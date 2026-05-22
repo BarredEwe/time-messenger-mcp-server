@@ -13,8 +13,8 @@
     "README.md",
     "LICENSE"
   ],
-  "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+ "scripts": {
+    "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
@@ -43,13 +43,17 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "dotenv": "^16.4.5",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "@types/express": "^5.0.6",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^20.14.2",
-    "tsup": "^8.1.0",
+    "express": "^5.2.1",
     "tsx": "^4.15.1",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "winston": "^3.19.0"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -1,0 +1,12 @@
+services:
+  time-mcp:
+    build:
+      context: src
+      dockerfile: Dockerfile
+    ports:
+      - "${MCP_HTTP_PORT:-8000}:8000"
+    environment:
+      NODE_TLS_REJECT_UNAUTHORIZED: "${NODE_TLS_REJECT_UNAUTHORIZED:-0}"
+      TIME_URL: "${TIME_URL}"
+      TIME_TOKEN: "${TIME_TOKEN}"
+      MCP_HTTP_PORT: "8000"

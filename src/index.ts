@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -17,6 +17,78 @@ import { teamTools } from './tools/teams.js';
 import { userTools } from './tools/users.js';
 import { authTools } from './tools/auth.js';
 import type { MfaLoginResult } from './tools/auth.js';
+import express from "express";
+import os from "os";
+import path from "path";
+import fs from "fs";
+import winston from "winston";
+
+function getDefaultLogDirectory() {
+    if (process.platform === "win32") {
+        const base = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+        return path.join(base, "time-mcp");
+    }
+    if (process.platform === "darwin") {
+        return path.join(os.homedir(), "Library", "Logs", "time-mcp");
+    }
+    const xdgStateHome = process.env.XDG_STATE_HOME;
+    if (xdgStateHome && xdgStateHome.length > 0) {
+        return path.join(xdgStateHome, "time-mcp");
+    }
+    return path.join(os.homedir(), ".local", "state", "time-mcp");
+}
+function isTruthyEnv(value) {
+    if (value === undefined || value === null)
+        return false;
+    const normalized = String(value).toLowerCase();
+    return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function getHttpPort() {
+    const rawPort = process.env.MCP_HTTP_PORT || process.env.PORT;
+    const parsedPort = Number(rawPort);
+    if (Number.isInteger(parsedPort) && parsedPort > 0) {
+        return parsedPort;
+    }
+    return 8000;
+}
+
+function getLogFilePath() {
+    if (isTruthyEnv(process.env.TIME_LOG_DISABLE)) {
+        return undefined;
+    }
+    const explicitFile = process.env.TIME_LOG_FILE;
+    if (explicitFile && explicitFile.trim().length > 0) {
+        return explicitFile;
+    }
+    const baseDir = process.env.TIME_LOG_DIR &&
+        process.env.TIME_LOG_DIR.trim().length > 0
+        ? process.env.TIME_LOG_DIR
+        : getDefaultLogDirectory();
+    let effectiveDir = baseDir;
+    if (isTruthyEnv(process.env.TIME_LOG_PER_CWD)) {
+        const sanitizedCwd = process
+            .cwd()
+            .replace(/[\\/]/g, "_")
+            .replace(/[:*?"<>|]/g, "");
+        effectiveDir = path.join(baseDir, sanitizedCwd);
+    }
+    try {
+        fs.mkdirSync(effectiveDir, { recursive: true });
+    }
+    catch {
+        return undefined; // If we cannot create the directory, disable file logging rather than polluting CWD
+    }
+    return path.join(effectiveDir, "time.log");
+}
+const resolvedLogFile = getLogFilePath();
+const logger = winston.createLogger({
+    level: "info",
+    format: winston.format.json(),
+    transports: resolvedLogFile
+        ? [new winston.transports.File({ filename: resolvedLogFile })]
+        : [],
+});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const allTools: any[] = [...authTools, ...messageTools, ...threadTools, ...channelTools, ...teamTools, ...userTools];
@@ -149,6 +221,13 @@ class TimeMcpServer {
     }
   }
 
+  async connect(transport) {
+        await this.server.connect(transport);
+    }
+    async close() {
+        await this.server.close();
+    }
+
   private setupHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const tools = allTools.map((tool) => ({
@@ -207,13 +286,53 @@ class TimeMcpServer {
       }
     });
   }
-
-  async run() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('Time MCP server running on stdio');
-  }
 }
 
-const server = new TimeMcpServer();
-server.run().catch(console.error);
+const app = express();
+app.use(express.json());
+app.post("/mcp", async (req, res) => {
+    const server = new TimeMcpServer();
+    const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+    });
+    res.on("close", () => {
+        transport.close().catch((error) => {
+            logger.error("Error closing /mcp transport", { error });
+        });
+        server.close().catch((error) => {
+            logger.error("Error closing /mcp server", { error });
+        });
+    });
+    try {
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+    }
+    catch (error) {
+        logger.error("Error handling /mcp request", { error });
+        if (!res.headersSent) {
+            res.status(500).json({
+                jsonrpc: "2.0",
+                error: {
+                    code: -32603,
+                    message: "Internal server error",
+                },
+                id: null,
+            });
+        }
+    }
+});
+const port = getHttpPort();
+const serverPromise = new Promise<void>((resolve, reject) => {
+    const httpServer = app.listen(port, () => {
+        logger.info("Time MCP HTTP server running", {
+            port,
+            streamableHttpEndpoint: "/mcp",
+        });
+        resolve();
+    });
+    httpServer.on("error", reject);
+});
+serverPromise.catch((error) => {
+    logger.error("Server error", error);
+    process.exit(1);
+});

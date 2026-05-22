@@ -1,35 +1,19 @@
 # time-messenger-mcp-server
 
+# Версия MCP сервера Streamable Http transport
+
+
+
 MCP (Model Context Protocol) сервер для корпоративного мессенджера [Time Messenger](https://time-messenger.ru/) (на базе Mattermost) от Т-Банка.
 
-Позволяет AI-ассистентам (Claude, OpenCode и др.) работать с Time Messenger: читать и отправлять сообщения, управлять тредами, искать каналы и пользователей, отслеживать непрочитанные сообщения.
+## Запуск 
 
-## Установка
+из корня проекта:
+``
+ docker compose up --build -d 
+``
 
-### Вариант 1: npx (без установки)
 
-```bash
-npx time-messenger-mcp-server
-```
-
-### Вариант 2: глобальная установка
-
-```bash
-npm install -g time-messenger-mcp-server
-time-messenger-mcp-server
-```
-
-### Вариант 3: из исходников
-
-```bash
-git clone https://github.com/anomalyco/time-messenger-mcp-server.git
-cd time-messenger-mcp-server
-npm install
-npm run build
-node dist/index.js
-```
-
-## Настройка
 
 ### Переменные окружения
 
@@ -58,75 +42,6 @@ Personal Access Token — постоянный токен, который не �
 ### Способ 3: OAuth2
 
 Только для веб-приложений (требует браузерный редирект). [Документация](https://docs.time-messenger.ru/integrations/oauth2_service_provider)
-
-## Интеграция с AI-клиентами
-
-### Claude Desktop
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-С токеном:
-```json
-{
-  "mcpServers": {
-    "time": {
-      "command": "npx",
-      "args": ["-y", "time-messenger-mcp-server"],
-      "env": {
-        "TIME_URL": "https://your-instance.time-messenger.ru",
-        "TIME_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
-```
-
-С логином/паролем:
-```json
-{
-  "mcpServers": {
-    "time": {
-      "command": "npx",
-      "args": ["-y", "time-messenger-mcp-server"],
-      "env": {
-        "TIME_URL": "https://your-instance.time-messenger.ru",
-        "TIME_LOGIN_ID": "your@email.com",
-        "TIME_PASSWORD": "your_password"
-      }
-    }
-  }
-}
-```
-
-### OpenCode
-
-`~/.config/opencode/opencode.json`:
-
-```json
-{
-  "mcp": {
-    "time": {
-      "type": "local",
-      "command": ["npx", "-y", "time-messenger-mcp-server"],
-      "enabled": true,
-      "environment": {
-        "TIME_URL": "https://your-instance.time-messenger.ru",
-        "TIME_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
-```
-
-### Любой MCP-совместимый клиент
-
-```bash
-npx time-messenger-mcp-server
-```
-
-Сервер использует stdio transport — стандартный для MCP.
 
 ## Доступные инструменты
 
