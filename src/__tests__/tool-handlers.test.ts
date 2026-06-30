@@ -80,6 +80,20 @@ describe('messageTools handlers', () => {
     expect(client.getPostsForChannel).toHaveBeenCalledWith('ch1', 0, 60);
   });
 
+  it('get_channel_messages rejects per_page over the 200 cap', async () => {
+    const tool = findTool(messageTools, 'get_channel_messages');
+    await expect(
+      tool.handler(client, { channel_id: 'ch1', per_page: 100000 })
+    ).rejects.toThrow();
+    expect(client.getPostsForChannel).not.toHaveBeenCalled();
+  });
+
+  it('get_channel_messages accepts per_page at the 200 cap', async () => {
+    const tool = findTool(messageTools, 'get_channel_messages');
+    await tool.handler(client, { channel_id: 'ch1', per_page: 200 });
+    expect(client.getPostsForChannel).toHaveBeenCalledWith('ch1', 0, 200);
+  });
+
   it('get_thread_messages calls getPostThread', async () => {
     const tool = findTool(messageTools, 'get_thread_messages');
     await tool.handler(client, { post_id: 'p1' });
