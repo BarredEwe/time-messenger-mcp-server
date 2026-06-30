@@ -74,6 +74,22 @@ describe('TimeClient', () => {
       }
     });
 
+    it('throws MFA_REQUIRED for any mfa.* id when no token supplied (e.g. mfa.validate_token.authenticate)', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ id: 'mfa.validate_token.authenticate.app_error', message: 'Invalid MFA token.' }, 401));
+      await expect(TimeClient.login('https://time.test.com', 'user', 'pass')).rejects.toThrow('MFA_REQUIRED');
+    });
+
+    it('does NOT treat mfa.* as MFA_REQUIRED when a token was supplied (wrong-code path)', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ id: 'mfa.validate_token.authenticate.app_error', message: 'Invalid MFA token.' }, 401));
+      await expect(TimeClient.login('https://time.test.com', 'user', 'pass', '000000')).rejects.toThrow('Login failed');
+    });
+
+    it('sends a browser-like User-Agent on login (WAF bypass)', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({}, 200, { Token: 'new-token' }));
+      await TimeClient.login('https://time.test.com', 'user', 'pass');
+      expect(fetchSpy.mock.calls[0][1].headers['User-Agent']).toMatch(/Mozilla\/5\.0/);
+    });
+
     it('throws on login failure without MFA', async () => {
       fetchSpy.mockReturnValue(mockFetchResponse({ message: 'Invalid credentials' }, 401));
       await expect(TimeClient.login('https://time.test.com', 'user', 'wrong')).rejects.toThrow('Login failed');
@@ -95,6 +111,12 @@ describe('TimeClient', () => {
           headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
         })
       );
+    });
+
+    it('sends a browser-like User-Agent header (WAF bypass)', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ id: 'me' }));
+      await client.getMe();
+      expect(fetchSpy.mock.calls[0][1].headers['User-Agent']).toMatch(/Mozilla\/5\.0/);
     });
 
     it('returns parsed JSON on 200', async () => {
@@ -146,6 +168,15 @@ describe('TimeClient', () => {
       await client.getUser('u1');
       expect(fetchSpy).toHaveBeenCalledWith(
         'https://time.test.com/api/v4/users/u1',
+        expect.anything()
+      );
+    });
+
+    it('getUser percent-encodes ids so they cannot traverse the path', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ id: 'x' }));
+      await client.getUser('../admin/secret');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/..%2Fadmin%2Fsecret',
         expect.anything()
       );
     });

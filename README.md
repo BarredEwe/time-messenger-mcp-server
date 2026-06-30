@@ -22,7 +22,7 @@ time-messenger-mcp-server
 ### Вариант 3: из исходников
 
 ```bash
-git clone https://github.com/anomalyco/time-messenger-mcp-server.git
+git clone https://github.com/BarredEwe/time-messenger-mcp-server.git
 cd time-messenger-mcp-server
 npm install
 npm run build
@@ -39,6 +39,8 @@ node dist/index.js
 | `TIME_TOKEN` | Personal Access Token | Один из способов |
 | `TIME_LOGIN_ID` | Email или логин | Один из способов |
 | `TIME_PASSWORD` | Пароль | Вместе с LOGIN_ID |
+| `TIME_REQUEST_TIMEOUT_MS` | Таймаут запроса к API, мс (по умолчанию `30000`) | Нет |
+| `TIME_USER_AGENT` | Переопределить User-Agent для запросов к API | Нет |
 
 ### Способ 1: Personal Access Token (рекомендуется)
 

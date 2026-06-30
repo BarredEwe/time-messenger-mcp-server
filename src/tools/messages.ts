@@ -65,7 +65,7 @@ export const messageTools = [
         },
         per_page: {
           type: 'number',
-          description: 'Messages per page (default: 60)',
+          description: 'Messages per page (default: 60, max: 200)',
         },
       },
       required: ['channel_id'],
@@ -73,8 +73,8 @@ export const messageTools = [
     handler: async (client: TimeClient, args: unknown) => {
       const schema = z.object({
         channel_id: z.string(),
-        page: z.number().default(0),
-        per_page: z.number().default(60),
+        page: z.number().int().min(0).default(0),
+        per_page: z.number().int().min(1).max(200).default(60),
       });
 
       const params = schema.parse(args);
