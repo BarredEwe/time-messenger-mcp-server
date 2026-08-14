@@ -83,12 +83,13 @@ export const messageTools = [
         params.page,
         params.per_page
       );
+      const authors = await resolveAuthors(client, extractPosts(postList));
 
       return {
         content: [
           {
             type: 'text',
-            text: formatPostList(postList),
+            text: formatPostList(postList, authors),
           },
         ],
       };
@@ -115,12 +116,13 @@ export const messageTools = [
 
       const params = schema.parse(args);
       const postList = await client.getPostThread(params.post_id);
+      const authors = await resolveAuthors(client, extractPosts(postList));
 
       return {
         content: [
           {
             type: 'text',
-            text: formatPostList(postList),
+            text: formatPostList(postList, authors),
           },
         ],
       };
@@ -152,12 +154,13 @@ export const messageTools = [
 
       const params = schema.parse(args);
       const result = await client.searchPosts(params.team_id, params.terms);
+      const authors = await resolveAuthors(client, Object.values(result.posts));
 
       return {
         content: [
           {
             type: 'text',
-            text: formatSearchResult(result),
+            text: formatSearchResult(result, authors),
           },
         ],
       };
@@ -165,9 +168,14 @@ export const messageTools = [
   },
 ];
 
-export function formatPostList(postList: PostList): string {
+/**
+ * Flattens a PostList into oldest-first posts, dropping duplicates and ids
+ * present in `order` but missing from `posts`.
+ */
+export function extractPosts(postList: PostList): Post[] {
   const seen = new Set<string>();
-  const posts = postList.order
+
+  return postList.order
     .map((id) => postList.posts[id])
     .filter((post): post is Post => {
       if (!post || seen.has(post.id)) return false;
@@ -175,6 +183,52 @@ export function formatPostList(postList: PostList): string {
       return true;
     })
     .reverse();
+}
+
+/**
+ * user_id → username. Cached for the process lifetime: usernames rarely
+ * change, and without a cache a 100-message page would issue 100 API calls.
+ */
+const usernameCache = new Map<string, string>();
+
+export async function resolveAuthors(
+  client: TimeClient,
+  posts: Post[]
+): Promise<Map<string, string>> {
+  const userIds = [...new Set(posts.map((post) => post.user_id).filter(Boolean))];
+  const unknownIds = userIds.filter((id) => !usernameCache.has(id));
+
+  await Promise.all(
+    unknownIds.map(async (id) => {
+      try {
+        const user = await client.getUser(id);
+        usernameCache.set(id, user.username || user.nickname || id);
+      } catch {
+        // A deleted user or a profile we cannot read must not break the
+        // message listing, so fall back to the raw id.
+        usernameCache.set(id, id);
+      }
+    })
+  );
+
+  return new Map(userIds.map((id) => [id, usernameCache.get(id) ?? id]));
+}
+
+function formatAuthor(post: Post, authors?: Map<string, string>): string {
+  const username = authors?.get(post.user_id);
+  return username ? `@${username}` : post.user_id;
+}
+
+function formatIds(post: Post): string {
+  const root = post.root_id ? ` | Root ID: ${post.root_id}` : '';
+  return `Post ID: ${post.id}${root}`;
+}
+
+export function formatPostList(
+  postList: PostList,
+  authors?: Map<string, string>
+): string {
+  const posts = extractPosts(postList);
 
   if (posts.length === 0) {
     return 'No messages found.';
@@ -183,16 +237,22 @@ export function formatPostList(postList: PostList): string {
   const lines = posts.map((post) => {
     const date = new Date(post.create_at).toLocaleString();
     const isReply = post.root_id ? ' (reply)' : '';
-    return `[${date}]${isReply}\n${post.message}\n---`;
+    return `[${date}]${isReply} ${formatAuthor(post, authors)}\n${post.message}\n${formatIds(post)}\n---`;
   });
 
   return lines.join('\n\n');
 }
 
-export function formatSearchResult(result: { order: string[]; posts: Record<string, Post> }): string {
+export function formatSearchResult(
+  result: { order: string[]; posts: Record<string, Post> },
+  authors?: Map<string, string>
+): string {
+  // The search API returns matches newest-first; reverse them so the order
+  // matches get_channel_messages (latest message last).
   const posts = result.order
     .map((id) => result.posts[id])
-    .filter(Boolean);
+    .filter((post): post is Post => Boolean(post))
+    .reverse();
 
   if (posts.length === 0) {
     return 'No messages found matching your search.';
@@ -200,7 +260,7 @@ export function formatSearchResult(result: { order: string[]; posts: Record<stri
 
   const lines = posts.map((post) => {
     const date = new Date(post.create_at).toLocaleString();
-    return `[${date}] Channel: ${post.channel_id}\n${post.message}\n---`;
+    return `[${date}] Channel: ${post.channel_id} ${formatAuthor(post, authors)}\n${post.message}\n${formatIds(post)}\n---`;
   });
 
   return `Found ${posts.length} message(s):\n\n${lines.join('\n\n')}`;

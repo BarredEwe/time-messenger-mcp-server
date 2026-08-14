@@ -88,6 +88,18 @@ export interface Thread {
   post: Post
 }
 
+/**
+ * Response of GET /users/{user_id}/teams/{team_id}/threads. The endpoint
+ * returns a wrapper object rather than a bare array, and `threads` is null
+ * when the user follows no threads.
+ */
+export interface UserThreads {
+  total: number
+  total_unread_threads: number
+  total_unread_mentions: number
+  threads: Thread[] | null
+}
+
 export interface ThreadStats {
   total_unread_threads: number
   total_unread_mentions: number
