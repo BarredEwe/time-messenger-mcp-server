@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { formatThread, formatThreads } from '../tools/threads.js';
-import type { Thread, Post, User } from '../types/time-api.js';
+import { extractThreads, formatThread, formatThreads } from '../tools/threads.js';
+import type { Thread, Post, User, UserThreads } from '../types/time-api.js';
 
 const makePost = (overrides: Partial<Post> & { id: string; message: string }): Post => ({
   create_at: 1000,
@@ -47,6 +47,39 @@ const makeThread = (overrides: Partial<Thread> & { id: string }): Thread => ({
   participants: [makeUser('u1')],
   post: makePost({ id: 'p1', message: 'Root' }),
   ...overrides,
+});
+
+describe('extractThreads', () => {
+  it('unwraps the object response returned by the threads endpoint', () => {
+    const thread = makeThread({ id: 't1' });
+    const response: UserThreads = {
+      total: 1,
+      total_unread_threads: 0,
+      total_unread_mentions: 0,
+      threads: [thread],
+    };
+    expect(extractThreads(response)).toEqual([thread]);
+  });
+
+  it('returns an empty array when threads is null', () => {
+    const response: UserThreads = {
+      total: 0,
+      total_unread_threads: 0,
+      total_unread_mentions: 0,
+      threads: null,
+    };
+    expect(extractThreads(response)).toEqual([]);
+  });
+
+  it('accepts a bare array', () => {
+    const thread = makeThread({ id: 't1' });
+    expect(extractThreads([thread])).toEqual([thread]);
+  });
+
+  it('returns an empty array for null/undefined', () => {
+    expect(extractThreads(null)).toEqual([]);
+    expect(extractThreads(undefined)).toEqual([]);
+  });
 });
 
 describe('formatThread', () => {

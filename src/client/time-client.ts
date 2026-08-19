@@ -4,7 +4,9 @@ import type {
   Channel,
   Post,
   PostList,
+  Reaction,
   Thread,
+  UserThreads,
   ThreadStats,
   ChannelUnread,
   TeamUnread,
@@ -255,10 +257,39 @@ export class TimeClient {
     );
   }
 
+  // ========== Reactions ==========
+
+  async addReaction(
+    userId: string,
+    postId: string,
+    emojiName: string
+  ): Promise<Reaction> {
+    return this.request<Reaction>('POST', '/reactions', {
+      user_id: userId,
+      post_id: postId,
+      emoji_name: emojiName,
+    });
+  }
+
+  async removeReaction(
+    userId: string,
+    postId: string,
+    emojiName: string
+  ): Promise<void> {
+    return this.request<void>(
+      'DELETE',
+      `/users/${enc(userId)}/posts/${enc(postId)}/reactions/${enc(emojiName)}`
+    );
+  }
+
+  async getReactions(postId: string): Promise<Reaction[]> {
+    return this.request<Reaction[]>('GET', `/posts/${enc(postId)}/reactions`);
+  }
+
   // ========== Threads ==========
 
-  async getUserThreads(userId: string, teamId: string): Promise<Thread[]> {
-    return this.request<Thread[]>(
+  async getUserThreads(userId: string, teamId: string): Promise<UserThreads> {
+    return this.request<UserThreads>(
       'GET',
       `/users/${enc(userId)}/teams/${enc(teamId)}/threads`
     );
