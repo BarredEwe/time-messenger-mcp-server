@@ -69,6 +69,13 @@ export interface Post {
   metadata: Record<string, any>
 }
 
+export interface Reaction {
+  user_id: string
+  post_id: string
+  emoji_name: string
+  create_at: number
+}
+
 export interface PostList {
   order: string[]
   posts: Record<string, Post>

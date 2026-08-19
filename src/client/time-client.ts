@@ -4,6 +4,7 @@ import type {
   Channel,
   Post,
   PostList,
+  Reaction,
   Thread,
   UserThreads,
   ThreadStats,
@@ -254,6 +255,35 @@ export class TimeClient {
       `/teams/${enc(teamId)}/posts/search`,
       { terms }
     );
+  }
+
+  // ========== Reactions ==========
+
+  async addReaction(
+    userId: string,
+    postId: string,
+    emojiName: string
+  ): Promise<Reaction> {
+    return this.request<Reaction>('POST', '/reactions', {
+      user_id: userId,
+      post_id: postId,
+      emoji_name: emojiName,
+    });
+  }
+
+  async removeReaction(
+    userId: string,
+    postId: string,
+    emojiName: string
+  ): Promise<void> {
+    return this.request<void>(
+      'DELETE',
+      `/users/${enc(userId)}/posts/${enc(postId)}/reactions/${enc(emojiName)}`
+    );
+  }
+
+  async getReactions(postId: string): Promise<Reaction[]> {
+    return this.request<Reaction[]>('GET', `/posts/${enc(postId)}/reactions`);
   }
 
   // ========== Threads ==========
