@@ -93,6 +93,13 @@ export interface ThreadStats {
   total_unread_mentions: number
 }
 
+export interface ThreadsResponse {
+  threads: Thread[]
+  total: number
+  total_unread_threads: number
+  total_unread_mentions: number
+}
+
 export interface ChannelUnread {
   channel_id: string
   msg_count: number

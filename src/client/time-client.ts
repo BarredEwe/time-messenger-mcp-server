@@ -6,6 +6,7 @@ import type {
   PostList,
   Thread,
   ThreadStats,
+  ThreadsResponse,
   ChannelUnread,
   TeamUnread,
   SearchResult,
@@ -264,14 +265,15 @@ export class TimeClient {
     );
   }
 
-  async getThreadsStats(
-    userId: string,
-    teamId: string
-  ): Promise<ThreadStats> {
-    return this.request<ThreadStats>(
+  async getThreadsStats(userId: string, teamId: string): Promise<ThreadStats> {
+    const response = await this.request<ThreadsResponse>(
       'GET',
-      `/users/${enc(userId)}/teams/${enc(teamId)}/threads/stats`
+      `/users/${enc(userId)}/teams/${enc(teamId)}/threads?totalsOnly=true`
     );
+    return {
+      total_unread_threads: response.total_unread_threads,
+      total_unread_mentions: response.total_unread_mentions,
+    };
   }
 
   async getUserThread(

@@ -341,13 +341,34 @@ describe('TimeClient', () => {
       );
     });
 
-    it('getThreadsStats calls correct path', async () => {
-      fetchSpy.mockReturnValue(mockFetchResponse({ total_unread_threads: 3, total_unread_mentions: 1 }));
-      await client.getThreadsStats('u1', 't1');
+    it('getThreadsStats requests totals only and returns nonzero unread totals', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({
+        threads: [],
+        total: 3,
+        total_unread_threads: 3,
+        total_unread_mentions: 1,
+      }));
+      const result = await client.getThreadsStats('u1', 't1');
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://time.test.com/api/v4/users/u1/teams/t1/threads/stats',
+        'https://time.test.com/api/v4/users/u1/teams/t1/threads?totalsOnly=true',
         expect.anything()
       );
+      expect(result).toEqual({ total_unread_threads: 3, total_unread_mentions: 1 });
+    });
+
+    it('getThreadsStats preserves numeric zero unread totals', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({
+        threads: [],
+        total: 0,
+        total_unread_threads: 0,
+        total_unread_mentions: 0,
+      }));
+      const result = await client.getThreadsStats('u1', 't1');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/u1/teams/t1/threads?totalsOnly=true',
+        expect.anything()
+      );
+      expect(result).toEqual({ total_unread_threads: 0, total_unread_mentions: 0 });
     });
 
     it('getUserThread calls correct path', async () => {
