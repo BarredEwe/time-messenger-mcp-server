@@ -230,6 +230,42 @@ describe('TimeClient', () => {
   });
 
   describe('Channel methods', () => {
+    it('getAllChannelsForUser calls the user-scoped channel endpoint', async () => {
+      const channels = [{ id: 'ch1', type: 'O' }, { id: 'ch2', type: 'D' }];
+      fetchSpy.mockReturnValue(mockFetchResponse(channels));
+
+      const result = await client.getAllChannelsForUser('user/one');
+
+      expect(result).toEqual(channels);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fone/channels',
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+
+    it('markChannelsRead posts the exact channel ID array', async () => {
+      const response = { status: 'OK', last_viewed_at_times: { ch1: 1700000000000 } };
+      fetchSpy.mockReturnValue(mockFetchResponse(response));
+
+      const result = await client.markChannelsRead('user/one', ['ch1', 'ch2']);
+      const [url, options] = fetchSpy.mock.calls[0];
+
+      expect(result).toEqual(response);
+      expect(url).toBe('https://time.test.com/api/v4/channels/members/user%2Fone/mark_read');
+      expect(options.method).toBe('POST');
+      expect(options.headers).toEqual(expect.objectContaining({
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      }));
+      expect(JSON.parse(options.body)).toEqual(['ch1', 'ch2']);
+    });
+
+    it('markChannelsRead throws TimeApiError on non-2xx', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ message: 'Not Found' }, 404));
+
+      await expect(client.markChannelsRead('u1', ['ch1'])).rejects.toBeInstanceOf(TimeApiError);
+    });
+
     it('getChannelsForUser calls correct path', async () => {
       fetchSpy.mockReturnValue(mockFetchResponse([]));
       await client.getChannelsForUser('u1', 't1');
