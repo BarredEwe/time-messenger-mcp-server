@@ -135,6 +135,76 @@ export const channelTools = [
       };
     },
   },
+
+  {
+    name: 'time_mark_channels_read',
+    description: 'Mutate channel read state for all available channels or selected channel IDs; an explicit mode is required',
+    inputSchema: {
+      type: 'object',
+      oneOf: [
+        {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', const: 'all' },
+          },
+          required: ['mode'],
+          additionalProperties: false,
+        },
+        {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', const: 'selected' },
+            channel_ids: {
+              type: 'array',
+              minItems: 1,
+              items: { type: 'string', minLength: 1 },
+            },
+          },
+          required: ['mode', 'channel_ids'],
+          additionalProperties: false,
+        },
+      ],
+    },
+    handler: async (client: TimeClient, args: unknown, userId: string) => {
+      const schema = z.discriminatedUnion('mode', [
+        z.object({ mode: z.literal('all') }).strict(),
+        z.object({
+          mode: z.literal('selected'),
+          channel_ids: z.array(z.string().trim().min(1)).min(1),
+        }).strict(),
+      ]);
+
+      const params = schema.parse(args);
+
+      switch (params.mode) {
+        case 'selected': {
+          const channelIds = [...new Set(params.channel_ids)];
+          await client.markChannelsRead(userId, channelIds);
+          return {
+            content: [{ type: 'text', text: `Marked ${channelIds.length} channel(s) as read.` }],
+          };
+        }
+        case 'all': {
+          const channels = await client.getAllChannelsForUser(userId);
+          const channelIds = [...new Set(channels.map((channel) => channel.id))];
+          if (channelIds.length === 0) {
+            return {
+              content: [{ type: 'text', text: 'No channels available to mark as read.' }],
+            };
+          }
+
+          await client.markChannelsRead(userId, channelIds);
+          return {
+            content: [{ type: 'text', text: `Marked ${channelIds.length} channel(s) as read.` }],
+          };
+        }
+        default: {
+          const exhaustiveInput: never = params;
+          return exhaustiveInput;
+        }
+      }
+    },
+  },
 ];
 
 export function formatChannels(channels: Channel[]): string {
