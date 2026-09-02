@@ -166,6 +166,7 @@ npx time-messenger-mcp-server
 | `get_channel` | Информация о канале |
 | `search_channels` | Поиск каналов |
 | `get_channel_unread` | Непрочитанные сообщения в канале |
+| `time_mark_channels_read` | Отметить прочитанными все доступные каналы при обязательном `mode: "all"` или только по явному непустому списку ID при `mode: "selected"` |
 
 ### Команды
 
