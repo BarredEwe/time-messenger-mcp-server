@@ -99,6 +99,11 @@ export interface ChannelUnread {
   mention_count: number
 }
 
+export interface MarkChannelsReadResponse {
+  status: string
+  last_viewed_at_times: Record<string, number>
+}
+
 export interface TeamUnread {
   team_id: string
   msg_count: number

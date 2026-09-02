@@ -5,7 +5,12 @@ import { channelTools } from '../tools/channels.js';
 import { teamTools } from '../tools/teams.js';
 import { userTools } from '../tools/users.js';
 import type { TimeClient } from '../client/time-client.js';
-import type { Post, PostList, Channel, Team, User, Thread, ThreadStats, ChannelUnread, TeamUnread, SearchResult } from '../types/time-api.js';
+import type { Post, PostList, Channel, Team, User, Thread, ThreadStats, ChannelUnread, MarkChannelsReadResponse, TeamUnread, SearchResult } from '../types/time-api.js';
+
+const markChannelsReadResponse = {
+  status: 'OK',
+  last_viewed_at_times: {},
+} satisfies MarkChannelsReadResponse;
 
 function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
   return {
@@ -17,6 +22,8 @@ function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
     getTeamsUnread: vi.fn().mockResolvedValue([] as TeamUnread[]),
     getTeamUnread: vi.fn().mockResolvedValue({ team_id: 't1', msg_count: 5, mention_count: 1 } as TeamUnread),
     getChannelsForUser: vi.fn().mockResolvedValue([] as Channel[]),
+    getAllChannelsForUser: vi.fn().mockResolvedValue([] as Channel[]),
+    markChannelsRead: vi.fn().mockResolvedValue(markChannelsReadResponse),
     getChannel: vi.fn().mockResolvedValue({ id: 'ch1', display_name: 'General' } as Channel),
     searchChannels: vi.fn().mockResolvedValue([] as Channel[]),
     getChannelUnread: vi.fn().mockResolvedValue({ channel_id: 'ch1', msg_count: 3, mention_count: 0 } as ChannelUnread),
@@ -35,7 +42,7 @@ function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
 }
 
 const findTool = (tools: unknown[], name: string) =>
-  (tools as { name: string; handler: Function }[]).find((t) => t.name === name)!;
+  (tools as { name: string; inputSchema: Record<string, unknown>; handler: Function }[]).find((t) => t.name === name)!;
 
 const userId = 'user123';
 
@@ -192,6 +199,148 @@ describe('channelTools handlers', () => {
     const tool = findTool(channelTools, 'get_channel_unread');
     await tool.handler(client, { channel_id: 'ch1' }, userId);
     expect(client.getChannelUnread).toHaveBeenCalledWith(userId, 'ch1');
+  });
+
+  it('exposes a closed two-branch schema for explicit all and selected modes', () => {
+    const tool = findTool(channelTools, 'time_mark_channels_read');
+
+    expect(tool.inputSchema).toEqual({
+      type: 'object',
+      oneOf: [
+        {
+          type: 'object',
+          properties: { mode: { type: 'string', const: 'all' } },
+          required: ['mode'],
+          additionalProperties: false,
+        },
+        {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', const: 'selected' },
+            channel_ids: {
+              type: 'array',
+              minItems: 1,
+              items: { type: 'string', minLength: 1 },
+            },
+          },
+          required: ['mode', 'channel_ids'],
+          additionalProperties: false,
+        },
+      ],
+    });
+  });
+
+  it('selected mode trims, deduplicates, preserves order, and sends one bulk request', async () => {
+    const tool = findTool(channelTools, 'time_mark_channels_read');
+
+    const result = await tool.handler(client, {
+      mode: 'selected',
+      channel_ids: [' ch1 ', 'ch2', 'ch1', '  ch2  ', 'ch3'],
+    }, userId);
+
+    expect(client.getAllChannelsForUser).not.toHaveBeenCalled();
+    expect(client.markChannelsRead).toHaveBeenCalledTimes(1);
+    expect(client.markChannelsRead).toHaveBeenCalledWith(userId, ['ch1', 'ch2', 'ch3']);
+    expect(result.content[0].text).toContain('3');
+  });
+
+  it('all mode discovers O, P, D, and G channels, deduplicates, and sends one bulk request', async () => {
+    const tool = findTool(channelTools, 'time_mark_channels_read');
+    const channel = {
+      id: 'base',
+      create_at: 0,
+      update_at: 0,
+      delete_at: 0,
+      team_id: '',
+      type: 'O',
+      display_name: '',
+      name: '',
+      header: '',
+      purpose: '',
+      last_post_at: 0,
+      total_msg_count: 0,
+      extra_update_at: 0,
+      creator_id: '',
+      scheme_id: '',
+      group_constrained: false,
+      shared: false,
+    } satisfies Channel;
+    vi.mocked(client.getAllChannelsForUser).mockResolvedValue([
+      { ...channel, id: 'public', type: 'O' },
+      { ...channel, id: 'private', type: 'P' },
+      { ...channel, id: 'direct', type: 'D' },
+      { ...channel, id: 'group', type: 'G' },
+      { ...channel, id: 'private', type: 'P' },
+    ]);
+
+    const result = await tool.handler(client, { mode: 'all' }, userId);
+
+    expect(client.getAllChannelsForUser).toHaveBeenCalledTimes(1);
+    expect(client.getAllChannelsForUser).toHaveBeenCalledWith(userId);
+    expect(client.getChannelsForUser).not.toHaveBeenCalled();
+    expect(client.getTeamsForUser).not.toHaveBeenCalled();
+    expect(client.markChannelsRead).toHaveBeenCalledTimes(1);
+    expect(client.markChannelsRead).toHaveBeenCalledWith(
+      userId,
+      ['public', 'private', 'direct', 'group']
+    );
+    expect(result.content[0].text).toContain('4');
+  });
+
+  it('all mode with no channels returns a no-op without a bulk request', async () => {
+    const tool = findTool(channelTools, 'time_mark_channels_read');
+
+    const result = await tool.handler(client, { mode: 'all' }, userId);
+
+    expect(client.getAllChannelsForUser).toHaveBeenCalledTimes(1);
+    expect(client.markChannelsRead).not.toHaveBeenCalled();
+    expect(result.content[0].text).toBe('No channels available to mark as read.');
+  });
+
+  it('propagates all-mode discovery failures without mutation or fallback calls', async () => {
+    const tool = findTool(channelTools, 'time_mark_channels_read');
+    const discoveryError = new Error('discovery failed');
+    vi.mocked(client.getAllChannelsForUser).mockRejectedValue(discoveryError);
+
+    await expect(tool.handler(client, { mode: 'all' }, userId)).rejects.toBe(discoveryError);
+
+    expect(client.getAllChannelsForUser).toHaveBeenCalledTimes(1);
+    expect(client.markChannelsRead).not.toHaveBeenCalled();
+    expect(client.getChannelsForUser).not.toHaveBeenCalled();
+    expect(client.getTeamsForUser).not.toHaveBeenCalled();
+  });
+
+  it('propagates bulk failures without discovery or fallback calls', async () => {
+    const tool = findTool(channelTools, 'time_mark_channels_read');
+    const bulkError = new Error('bulk failed');
+    vi.mocked(client.markChannelsRead).mockRejectedValue(bulkError);
+
+    await expect(tool.handler(client, {
+      mode: 'selected',
+      channel_ids: ['ch1'],
+    }, userId)).rejects.toBe(bulkError);
+
+    expect(client.markChannelsRead).toHaveBeenCalledTimes(1);
+    expect(client.getAllChannelsForUser).not.toHaveBeenCalled();
+    expect(client.getChannelsForUser).not.toHaveBeenCalled();
+    expect(client.getTeamsForUser).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing mode', {}],
+    ['invalid mode', { mode: 'invalid' }],
+    ['channel_ids in all mode', { mode: 'all', channel_ids: ['ch1'] }],
+    ['missing channel_ids in selected mode', { mode: 'selected' }],
+    ['empty channel_ids in selected mode', { mode: 'selected', channel_ids: [] }],
+    ['whitespace-only channel ID', { mode: 'selected', channel_ids: ['   '] }],
+    ['unexpected property', { mode: 'selected', channel_ids: ['ch1'], unexpected: true }],
+  ])('rejects %s before calling the client', async (_label, input) => {
+    const tool = findTool(channelTools, 'time_mark_channels_read');
+
+    await expect(tool.handler(client, input, userId)).rejects.toThrow();
+
+    expect(client.getAllChannelsForUser).not.toHaveBeenCalled();
+    expect(client.markChannelsRead).not.toHaveBeenCalled();
   });
 });
 

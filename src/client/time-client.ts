@@ -7,6 +7,7 @@ import type {
   Thread,
   ThreadStats,
   ChannelUnread,
+  MarkChannelsReadResponse,
   TeamUnread,
   SearchResult,
   ErrorInfo,
@@ -189,6 +190,18 @@ export class TimeClient {
     return this.request<Channel[]>(
       'GET',
       `/users/${enc(userId)}/teams/${enc(teamId)}/channels`
+    );
+  }
+
+  async getAllChannelsForUser(userId: string): Promise<Channel[]> {
+    return this.request<Channel[]>('GET', `/users/${enc(userId)}/channels`);
+  }
+
+  async markChannelsRead(userId: string, channelIds: string[]): Promise<MarkChannelsReadResponse> {
+    return this.request<MarkChannelsReadResponse>(
+      'POST',
+      `/channels/members/${enc(userId)}/mark_read`,
+      channelIds
     );
   }
 
