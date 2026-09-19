@@ -643,6 +643,62 @@ describe('TimeClient', () => {
     });
   });
 
+  describe('Reaction methods', () => {
+    it('addReaction calls POST /reactions with the full triple', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ user_id: 'u1', post_id: 'p1', emoji_name: '+1' }));
+      await client.addReaction('u1', 'p1', '+1');
+      const call = fetchSpy.mock.calls[0];
+      expect(call[0]).toBe('https://time.test.com/api/v4/reactions');
+      expect(call[1].method).toBe('POST');
+      expect(JSON.parse(call[1].body)).toEqual({
+        user_id: 'u1',
+        post_id: 'p1',
+        emoji_name: '+1',
+      });
+    });
+
+    it('removeReaction calls DELETE and percent-encodes the emoji name', async () => {
+      fetchSpy.mockReturnValue(Promise.resolve({ ok: true, status: 204, headers: { get: () => null } } as unknown as Response));
+      await client.removeReaction('u1', 'p1', '+1');
+      const call = fetchSpy.mock.calls[0];
+      expect(call[1].method).toBe('DELETE');
+      expect(call[0]).toBe('https://time.test.com/api/v4/users/u1/posts/p1/reactions/%2B1');
+    });
+
+    it('removeReaction resolves on 204 without a body', async () => {
+      fetchSpy.mockReturnValue(Promise.resolve({ ok: true, status: 204, headers: { get: () => null } } as unknown as Response));
+      await expect(client.removeReaction('u1', 'p1', 'eyes')).resolves.toEqual({});
+    });
+
+    it('getReactions calls GET /posts/{id}/reactions', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse([{ user_id: 'u1', post_id: 'p1', emoji_name: 'eyes' }]));
+      const reactions = await client.getReactions('p1');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/posts/p1/reactions',
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(reactions).toHaveLength(1);
+    });
+
+    it('getReactions percent-encodes the post id', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse([]));
+      await client.getReactions('../admin/secret');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/posts/..%2Fadmin%2Fsecret/reactions',
+        expect.anything()
+      );
+    });
+
+    it('getUsersByIds posts the id array to /users/ids', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse([{ id: 'u1', username: 'alice' }]));
+      await client.getUsersByIds(['u1', 'u2']);
+      const call = fetchSpy.mock.calls[0];
+      expect(call[0]).toBe('https://time.test.com/api/v4/users/ids');
+      expect(call[1].method).toBe('POST');
+      expect(JSON.parse(call[1].body)).toEqual(['u1', 'u2']);
+    });
+  });
+
   describe('Thread methods', () => {
     it('getUserThreads calls correct path', async () => {
       fetchSpy.mockReturnValue(mockFetchResponse([]));

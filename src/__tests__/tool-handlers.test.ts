@@ -4,6 +4,7 @@ import { threadTools } from '../tools/threads.js';
 import { channelTools } from '../tools/channels.js';
 import { teamTools } from '../tools/teams.js';
 import { userTools } from '../tools/users.js';
+import { clearUsernameCache } from '../tools/usernames.js';
 import type { TimeClient } from '../client/time-client.js';
 import type { Post, PostList, Channel, Team, User, Thread, ThreadStats, ChannelUnread, MarkChannelsReadResult, TeamUnread, SearchResult } from '../types/time-api.js';
 
@@ -16,6 +17,7 @@ function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
   return {
     getMe: vi.fn().mockResolvedValue({ id: 'me', username: 'me' } as User),
     getUser: vi.fn().mockResolvedValue({ id: 'u1', username: 'user1' } as User),
+    getUsersByIds: vi.fn().mockResolvedValue([] as User[]),
     searchUsers: vi.fn().mockResolvedValue([] as User[]),
     getTeamsForUser: vi.fn().mockResolvedValue([] as Team[]),
     getTeam: vi.fn().mockResolvedValue({ id: 't1', display_name: 'Team' } as Team),
@@ -111,6 +113,47 @@ describe('messageTools handlers', () => {
     const tool = findTool(messageTools, 'search_messages');
     await tool.handler(client, { team_id: 't1', terms: 'hello' });
     expect(client.searchPosts).toHaveBeenCalledWith('t1', 'hello');
+  });
+
+  describe('author rendering when a profile cannot be resolved', () => {
+    const postList = {
+      order: ['p1'],
+      posts: {
+        p1: { id: 'p1', user_id: 'u_missing', message: 'Hi', create_at: 1000 } as Post,
+      },
+      next_post_id: '',
+      prev_post_id: '',
+    } as PostList;
+
+    beforeEach(() => {
+      clearUsernameCache();
+    });
+
+    it('prints the raw id when /users/ids omits the profile', async () => {
+      const c = createMockClient({
+        getPostsForChannel: vi.fn().mockResolvedValue(postList),
+        getUsersByIds: vi.fn().mockResolvedValue([]),
+      });
+
+      const tool = findTool(messageTools, 'get_channel_messages');
+      const result = await tool.handler(c, { channel_id: 'ch1' });
+
+      expect(result.content[0].text).toContain('u_missing');
+      expect(result.content[0].text).not.toContain('@u_missing');
+    });
+
+    it('prints the raw id when the lookup batch fails', async () => {
+      const c = createMockClient({
+        getPostsForChannel: vi.fn().mockResolvedValue(postList),
+        getUsersByIds: vi.fn().mockRejectedValue(new Error('503 Service Unavailable')),
+      });
+
+      const tool = findTool(messageTools, 'get_channel_messages');
+      const result = await tool.handler(c, { channel_id: 'ch1' });
+
+      expect(result.content[0].text).toContain('u_missing');
+      expect(result.content[0].text).not.toContain('@u_missing');
+    });
   });
 });
 

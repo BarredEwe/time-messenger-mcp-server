@@ -4,7 +4,9 @@ import type {
   Channel,
   Post,
   PostList,
+  Reaction,
   Thread,
+  UserThreads,
   ThreadStats,
   ThreadsResponse,
   ChannelUnread,
@@ -177,6 +179,18 @@ export class TimeClient {
 
   async getUser(userId: string): Promise<User> {
     return this.request<User>('GET', `/users/${enc(userId)}`);
+  }
+
+  /**
+   * Resolves many profiles in one request. Listing a page of messages needs a
+   * username per author, and one GET /users/{id} per author would open dozens
+   * of connections where a single POST does.
+   *
+   * Ids the server does not know are simply absent from the response — it does
+   * not fail the whole batch.
+   */
+  async getUsersByIds(userIds: string[]): Promise<User[]> {
+    return this.request<User[]>('POST', '/users/ids', userIds);
   }
 
   async searchUsers(term: string): Promise<User[]> {
@@ -370,10 +384,39 @@ export class TimeClient {
     );
   }
 
+  // ========== Reactions ==========
+
+  async addReaction(
+    userId: string,
+    postId: string,
+    emojiName: string
+  ): Promise<Reaction> {
+    return this.request<Reaction>('POST', '/reactions', {
+      user_id: userId,
+      post_id: postId,
+      emoji_name: emojiName,
+    });
+  }
+
+  async removeReaction(
+    userId: string,
+    postId: string,
+    emojiName: string
+  ): Promise<void> {
+    return this.request<void>(
+      'DELETE',
+      `/users/${enc(userId)}/posts/${enc(postId)}/reactions/${enc(emojiName)}`
+    );
+  }
+
+  async getReactions(postId: string): Promise<Reaction[]> {
+    return this.request<Reaction[]>('GET', `/posts/${enc(postId)}/reactions`);
+  }
+
   // ========== Threads ==========
 
-  async getUserThreads(userId: string, teamId: string): Promise<Thread[]> {
-    return this.request<Thread[]>(
+  async getUserThreads(userId: string, teamId: string): Promise<UserThreads> {
+    return this.request<UserThreads>(
       'GET',
       `/users/${enc(userId)}/teams/${enc(teamId)}/threads`
     );

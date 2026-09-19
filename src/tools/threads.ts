@@ -1,6 +1,21 @@
 import { z } from 'zod';
 import type { TimeClient } from '../client/time-client.js';
-import type { Thread } from '../types/time-api.js';
+import type { Thread, UserThreads } from '../types/time-api.js';
+
+/**
+ * Normalizes the threads endpoint response to an array. The API answers with a
+ * `{ total, threads }` wrapper whose `threads` is null when nothing is
+ * followed; a bare array is still accepted in case other API versions send one.
+ */
+export function extractThreads(
+  response: UserThreads | Thread[] | null | undefined
+): Thread[] {
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  return response?.threads ?? [];
+}
 
 export const threadTools = [
   {
@@ -22,13 +37,13 @@ export const threadTools = [
       });
 
       const params = schema.parse(args);
-      const threads = await client.getUserThreads(userId, params.team_id);
+      const response = await client.getUserThreads(userId, params.team_id);
 
       return {
         content: [
           {
             type: 'text',
-            text: formatThreads(threads),
+            text: formatThreads(extractThreads(response)),
           },
         ],
       };
