@@ -62,6 +62,24 @@ describe('normalizeEmojiName', () => {
   it('rejects a name with invalid characters', () => {
     expect(() => normalizeEmojiName('thumbs up!')).toThrow(/Unsupported emoji/);
   });
+
+  it('accepts emoji characters with or without the U+FE0F selector', () => {
+    const cp = (...points: number[]) => String.fromCodePoint(...points);
+    expect(normalizeEmojiName(cp(0x26a0))).toBe('warning');
+    expect(normalizeEmojiName(cp(0x26a0, 0xfe0f))).toBe('warning');
+    expect(normalizeEmojiName(cp(0x2714))).toBe('heavy_check_mark');
+    expect(normalizeEmojiName(cp(0x2764, 0xfe0f))).toBe('heart');
+  });
+
+  it('drops skin-tone modifiers and uses the base reaction', () => {
+    expect(normalizeEmojiName(String.fromCodePoint(0x1f44d, 0x1f3fb))).toBe('+1');
+    expect(normalizeEmojiName(String.fromCodePoint(0x1f44f, 0x1f3ff))).toBe('clap');
+  });
+
+  it('does not resolve Object.prototype members as emoji', () => {
+    expect(normalizeEmojiName('constructor')).toBe('constructor');
+    expect(normalizeEmojiName(':toString:')).toBe('tostring');
+  });
 });
 
 describe('reactionTools handlers', () => {
@@ -83,6 +101,32 @@ describe('reactionTools handlers', () => {
     const tool = findTool('remove_reaction');
     await tool.handler(client, { post_id: 'p1', emoji_name: ':tada:' }, userId);
     expect(client.removeReaction).toHaveBeenCalledWith(userId, 'p1', 'tada');
+  });
+
+  it('remove_reaction does not look up reactions for a canonical name', async () => {
+    const tool = findTool('remove_reaction');
+    await tool.handler(client, { post_id: 'p1', emoji_name: '+1' }, userId);
+    expect(client.getReactions).not.toHaveBeenCalled();
+    expect(client.removeReaction).toHaveBeenCalledWith(userId, 'p1', '+1');
+  });
+
+  it('remove_reaction deletes a reaction stored under the typed alias', async () => {
+    vi.mocked(client.getReactions).mockResolvedValue([
+      { user_id: userId, post_id: 'p1', emoji_name: 'thumbsup', create_at: 1 },
+      { user_id: 'someone_else', post_id: 'p1', emoji_name: '+1', create_at: 2 },
+    ]);
+    const tool = findTool('remove_reaction');
+    await tool.handler(client, { post_id: 'p1', emoji_name: 'thumbsup' }, userId);
+    expect(client.removeReaction).toHaveBeenCalledWith(userId, 'p1', 'thumbsup');
+  });
+
+  it('remove_reaction prefers the canonical reaction when the user has it', async () => {
+    vi.mocked(client.getReactions).mockResolvedValue([
+      { user_id: userId, post_id: 'p1', emoji_name: '+1', create_at: 1 },
+    ]);
+    const tool = findTool('remove_reaction');
+    await tool.handler(client, { post_id: 'p1', emoji_name: 'thumbsup' }, userId);
+    expect(client.removeReaction).toHaveBeenCalledWith(userId, 'p1', '+1');
   });
 
   it('get_reactions reports an empty list', async () => {

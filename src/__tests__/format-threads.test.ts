@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractThreads, formatThread, formatThreads } from '../tools/threads.js';
-import type { Thread, Post, User, UserThreads } from '../types/time-api.js';
+import type { Thread, Post, User, ThreadsResponse } from '../types/time-api.js';
 
 const makePost = (overrides: Partial<Post> & { id: string; message: string }): Post => ({
   create_at: 1000,
@@ -52,7 +52,7 @@ const makeThread = (overrides: Partial<Thread> & { id: string }): Thread => ({
 describe('extractThreads', () => {
   it('unwraps the object response returned by the threads endpoint', () => {
     const thread = makeThread({ id: 't1' });
-    const response: UserThreads = {
+    const response: ThreadsResponse = {
       total: 1,
       total_unread_threads: 0,
       total_unread_mentions: 0,
@@ -62,7 +62,7 @@ describe('extractThreads', () => {
   });
 
   it('returns an empty array when threads is null', () => {
-    const response: UserThreads = {
+    const response: ThreadsResponse = {
       total: 0,
       total_unread_threads: 0,
       total_unread_mentions: 0,

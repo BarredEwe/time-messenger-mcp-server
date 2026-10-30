@@ -101,6 +101,27 @@ describe('resolveUsernames', () => {
 
     expect(getUsersByIds).not.toHaveBeenCalled();
   });
+
+  it('re-requests a cached id once its entry expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const getUsersByIds = vi
+        .fn()
+        .mockResolvedValueOnce([user('u1', 'alice')])
+        .mockResolvedValueOnce([user('u1', 'alice.renamed')]);
+      const client = createClient(getUsersByIds);
+
+      await resolveUsernames(client, ['u1']);
+      vi.advanceTimersByTime(9 * 60 * 1000);
+      expect((await resolveUsernames(client, ['u1'])).get('u1')).toBe('alice');
+
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      expect((await resolveUsernames(client, ['u1'])).get('u1')).toBe('alice.renamed');
+      expect(getUsersByIds).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('resolveAuthors', () => {

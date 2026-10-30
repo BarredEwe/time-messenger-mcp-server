@@ -73,6 +73,26 @@ const EMOJI_ALIAS_TO_NAME: Record<string, string> = {
 
 const EMOJI_NAME_PATTERN = /^[a-z0-9_+-]+$/;
 
+// U+FE0F (emoji presentation selector) is optional in practice: `⚠` and `⚠️`
+// are the same emoji, and models often drop it. Skin-tone modifiers are
+// stripped as well, so `👍🏻` lands on the base `+1` reaction.
+const EMOJI_VARIATION_PATTERN = /[\uFE0F\u{1F3FB}-\u{1F3FF}]/gu;
+
+// Own-property lookup: a plain `table[key]` would return
+// Object.prototype members for inputs like "constructor".
+function lookup(table: Record<string, string>, key: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
+function lookupEmojiChar(input: string): string | undefined {
+  const bare = input.replace(EMOJI_VARIATION_PATTERN, '');
+  return (
+    lookup(EMOJI_CHAR_TO_NAME, input) ??
+    lookup(EMOJI_CHAR_TO_NAME, bare) ??
+    lookup(EMOJI_CHAR_TO_NAME, `${bare}\uFE0F`)
+  );
+}
+
 /**
  * Normalizes user input to the canonical emoji name: `:tada:`, `tada` and `🎉`
  * all become `tada`, `👍` and `thumbsup` both become `+1`. Unknown characters
@@ -81,12 +101,12 @@ const EMOJI_NAME_PATTERN = /^[a-z0-9_+-]+$/;
  */
 export function normalizeEmojiName(input: string): string {
   const trimmed = input.trim();
-  const mapped = EMOJI_CHAR_TO_NAME[trimmed];
+  const mapped = lookupEmojiChar(trimmed);
   if (mapped) {
     return mapped;
   }
 
-  const name = trimmed.replace(/^:+/, '').replace(/:+$/, '').toLowerCase();
+  const name = stripColons(trimmed);
 
   if (!EMOJI_NAME_PATTERN.test(name)) {
     throw new Error(
@@ -94,7 +114,39 @@ export function normalizeEmojiName(input: string): string {
     );
   }
 
-  return EMOJI_ALIAS_TO_NAME[name] ?? name;
+  return lookup(EMOJI_ALIAS_TO_NAME, name) ?? name;
+}
+
+function stripColons(input: string): string {
+  return input.replace(/^:+/, '').replace(/:+$/, '').toLowerCase();
+}
+
+/**
+ * Picks the name to delete. Normally the canonical one, but a reaction stored
+ * under an alias (`thumbsup`, written by an older client or straight through
+ * the API) can only be deleted by that exact name — so when the caller typed
+ * an alias and only the alias reaction exists, the alias is used.
+ */
+async function resolveReactionToRemove(
+  client: TimeClient,
+  userId: string,
+  postId: string,
+  input: string
+): Promise<string> {
+  const canonical = normalizeEmojiName(input);
+  const typed = stripColons(input.trim());
+
+  if (typed === canonical || lookup(EMOJI_ALIAS_TO_NAME, typed) === undefined) {
+    return canonical;
+  }
+
+  const mine = new Set(
+    ((await client.getReactions(postId)) ?? [])
+      .filter((reaction) => reaction.user_id === userId)
+      .map((reaction) => reaction.emoji_name)
+  );
+
+  return !mine.has(canonical) && mine.has(typed) ? typed : canonical;
 }
 
 export const reactionTools = [
@@ -162,7 +214,12 @@ export const reactionTools = [
       });
 
       const params = schema.parse(args);
-      const emojiName = normalizeEmojiName(params.emoji_name);
+      const emojiName = await resolveReactionToRemove(
+        client,
+        userId,
+        params.post_id,
+        params.emoji_name
+      );
       await client.removeReaction(userId, params.post_id, emojiName);
 
       return {
