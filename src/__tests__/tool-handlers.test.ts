@@ -466,56 +466,53 @@ describe('channel category tools', () => {
 
   it('exposes exactly the seven complete channel category tools', () => {
     expect(channelCategoryTools.map((tool) => tool.name)).toEqual([
-      'time_list_channel_categories',
-      'time_create_channel_category',
-      'time_update_channel_category',
-      'time_delete_channel_category',
-      'time_reorder_channel_categories',
-      'time_move_channel_to_category',
-      'time_set_channel_favorite',
+      'list_channel_categories',
+      'create_channel_category',
+      'update_channel_category',
+      'delete_channel_category',
+      'reorder_channel_categories',
+      'move_channel_to_category',
+      'set_channel_favorite',
     ]);
   });
 
   it('publishes strict channel category JSON schemas without user_id', () => {
     for (const tool of channelCategoryTools) {
       expect(tool.inputSchema.type).toBe('object');
+      expect(tool.inputSchema).not.toHaveProperty('anyOf');
+      expect(tool.inputSchema).not.toHaveProperty('oneOf');
+      expect(tool.inputSchema).not.toHaveProperty('allOf');
       expect(tool.inputSchema.additionalProperties).toBe(false);
       expect(JSON.stringify(tool.inputSchema)).not.toContain('user_id');
     }
 
-    expect(findChannelCategoryTool('time_list_channel_categories').inputSchema).toMatchObject({
+    expect(findChannelCategoryTool('list_channel_categories').inputSchema).toMatchObject({
       properties: { team_id: { type: 'string', minLength: 1 } },
       required: ['team_id'],
     });
-    expect(findChannelCategoryTool('time_create_channel_category').inputSchema).toMatchObject({
+    expect(findChannelCategoryTool('create_channel_category').inputSchema).toMatchObject({
       properties: {
         team_id: { type: 'string', minLength: 1 },
         display_name: { type: 'string', minLength: 1 },
       },
       required: ['team_id', 'display_name'],
     });
-    expect(findChannelCategoryTool('time_update_channel_category').inputSchema).toMatchObject({
+    expect(findChannelCategoryTool('update_channel_category').inputSchema).toMatchObject({
       properties: {
         team_id: { type: 'string', minLength: 1 },
         category_id: { type: 'string', minLength: 1 },
         sorting: { enum: ['', 'manual', 'recent', 'alpha'] },
       },
       required: ['team_id', 'category_id'],
-      anyOf: [
-        { required: ['display_name'] },
-        { required: ['sorting'] },
-        { required: ['muted'] },
-        { required: ['collapsed'] },
-      ],
     });
-    expect(findChannelCategoryTool('time_delete_channel_category').inputSchema).toMatchObject({
+    expect(findChannelCategoryTool('delete_channel_category').inputSchema).toMatchObject({
       properties: {
         team_id: { type: 'string', minLength: 1 },
         category_id: { type: 'string', minLength: 1 },
       },
       required: ['team_id', 'category_id'],
     });
-    expect(findChannelCategoryTool('time_reorder_channel_categories').inputSchema).toMatchObject({
+    expect(findChannelCategoryTool('reorder_channel_categories').inputSchema).toMatchObject({
       properties: {
         team_id: { type: 'string', minLength: 1 },
         category_ids: {
@@ -526,7 +523,7 @@ describe('channel category tools', () => {
       },
       required: ['team_id', 'category_ids'],
     });
-    expect(findChannelCategoryTool('time_move_channel_to_category').inputSchema).toMatchObject({
+    expect(findChannelCategoryTool('move_channel_to_category').inputSchema).toMatchObject({
       properties: {
         team_id: { type: 'string', minLength: 1 },
         channel_id: { type: 'string', minLength: 1 },
@@ -534,7 +531,7 @@ describe('channel category tools', () => {
       },
       required: ['team_id', 'channel_id', 'category_id'],
     });
-    expect(findChannelCategoryTool('time_set_channel_favorite').inputSchema).toMatchObject({
+    expect(findChannelCategoryTool('set_channel_favorite').inputSchema).toMatchObject({
       properties: {
         team_id: { type: 'string', minLength: 1 },
         channel_id: { type: 'string', minLength: 1 },
@@ -546,35 +543,35 @@ describe('channel category tools', () => {
 
   it('rejects unknown, empty, and metadata-free channel category inputs', async () => {
     await expect(
-      findChannelCategoryTool('time_list_channel_categories').handler(
+      findChannelCategoryTool('list_channel_categories').handler(
         client,
         { team_id: 'team-1', user_id: 'someone-else' },
         userId
       )
     ).rejects.toThrow();
     await expect(
-      findChannelCategoryTool('time_create_channel_category').handler(
+      findChannelCategoryTool('create_channel_category').handler(
         client,
         { team_id: 'team-1', display_name: '' },
         userId
       )
     ).rejects.toThrow();
     await expect(
-      findChannelCategoryTool('time_update_channel_category').handler(
+      findChannelCategoryTool('update_channel_category').handler(
         client,
         { team_id: 'team-1', category_id: 'category-1' },
         userId
       )
     ).rejects.toThrow();
     await expect(
-      findChannelCategoryTool('time_update_channel_category').handler(
+      findChannelCategoryTool('update_channel_category').handler(
         client,
         { team_id: 'team-1', category_id: 'category-1', channel_ids: ['channel-2'] },
         userId
       )
     ).rejects.toThrow();
     await expect(
-      findChannelCategoryTool('time_reorder_channel_categories').handler(
+      findChannelCategoryTool('reorder_channel_categories').handler(
         client,
         { team_id: 'team-1', category_ids: [] },
         userId
@@ -618,7 +615,7 @@ describe('channel category tools', () => {
       getChannelsForUser: vi.fn().mockResolvedValue([channel]),
     });
 
-    const result = await findChannelCategoryTool('time_list_channel_categories').handler(
+    const result = await findChannelCategoryTool('list_channel_categories').handler(
       client,
       { team_id: 'team-1' },
       userId
@@ -628,22 +625,18 @@ describe('channel category tools', () => {
     expect(client.getChannelCategories).toHaveBeenCalledWith(userId, 'team-1');
     expect(client.getChannelsForUser).toHaveBeenCalledWith(userId, 'team-1');
     expect(text.indexOf('Second')).toBeLessThan(text.indexOf('First'));
-    expect(text).toContain('category-2');
-    expect(text).toContain('manual');
-    expect(text).toContain('Sort order: 42');
-    expect(text).toContain('Collapsed: true');
-    expect(text).toContain('[Public] Town Square');
-    expect(text).toContain('channel-1');
-    expect(text).toContain('town-square');
-    expect(text).toContain('Last post: Never');
-    expect(text).toContain('unknown-channel');
+    expect(text).toContain('Category: Second (category-2)');
+    expect(text).toContain('sorting: manual');
+    expect(text).toContain('collapsed');
+    expect(text).toContain('- [Public] Town Square (channel-1)');
+    expect(text).toContain('- Unknown channel (unknown-channel)');
   });
 
   it('creates a custom category with no initial channels', async () => {
     const created = createCategory({ display_name: 'Planning', channel_ids: [] });
     client = createMockClient({ createChannelCategory: vi.fn().mockResolvedValue(created) });
 
-    const result = await findChannelCategoryTool('time_create_channel_category').handler(
+    const result = await findChannelCategoryTool('create_channel_category').handler(
       client,
       { team_id: 'team-1', display_name: 'Planning' },
       userId
@@ -666,7 +659,7 @@ describe('channel category tools', () => {
       updateChannelCategory: vi.fn().mockResolvedValue(updated),
     });
 
-    const result = await findChannelCategoryTool('time_update_channel_category').handler(
+    const result = await findChannelCategoryTool('update_channel_category').handler(
       client,
       { team_id: 'team-1', category_id: existing.id, display_name: 'Renamed', muted: true },
       userId
@@ -686,7 +679,7 @@ describe('channel category tools', () => {
     client = createMockClient({
       getChannelCategories: vi.fn().mockResolvedValue({ categories: [managed], order: [managed.id] }),
     });
-    const tool = findChannelCategoryTool('time_update_channel_category');
+    const tool = findChannelCategoryTool('update_channel_category');
 
     await expect(
       tool.handler(client, { team_id: 'team-1', category_id: 'missing', muted: true }, userId)
@@ -697,8 +690,13 @@ describe('channel category tools', () => {
     expect(client.updateChannelCategory).not.toHaveBeenCalled();
   });
 
-  it('deletes one category through the direct route', async () => {
-    const result = await findChannelCategoryTool('time_delete_channel_category').handler(
+  it('deletes one custom category through the direct route', async () => {
+    const custom = createCategory();
+    client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({ categories: [custom], order: [custom.id] }),
+    });
+
+    const result = await findChannelCategoryTool('delete_channel_category').handler(
       client,
       { team_id: 'team-1', category_id: 'category-1' },
       userId
@@ -709,11 +707,14 @@ describe('channel category tools', () => {
   });
 
   it('sends the requested category order as a raw array', async () => {
+    const first = createCategory({ id: 'category-1' });
+    const second = createCategory({ id: 'category-2' });
     client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({ categories: [first, second], order: [first.id, second.id] }),
       reorderChannelCategories: vi.fn().mockResolvedValue(['category-2', 'category-1']),
     });
 
-    const result = await findChannelCategoryTool('time_reorder_channel_categories').handler(
+    const result = await findChannelCategoryTool('reorder_channel_categories').handler(
       client,
       { team_id: 'team-1', category_ids: ['category-2', 'category-1'] },
       userId
@@ -729,7 +730,7 @@ describe('channel category tools', () => {
   });
 
   it('rejects malformed move input before listing categories', async () => {
-    const tool = findChannelCategoryTool('time_move_channel_to_category');
+    const tool = findChannelCategoryTool('move_channel_to_category');
 
     await expect(
       tool.handler(client, { team_id: 'team-1', channel_id: '', category_id: 'category-1' }, userId)
@@ -745,7 +746,7 @@ describe('channel category tools', () => {
   });
 
   it('rejects malformed favorite input before listing categories', async () => {
-    const tool = findChannelCategoryTool('time_set_channel_favorite');
+    const tool = findChannelCategoryTool('set_channel_favorite');
 
     await expect(
       tool.handler(client, { team_id: 'team-1', channel_id: 'channel-1', favorite: 'yes' }, userId)
@@ -763,7 +764,7 @@ describe('channel category tools', () => {
     });
 
     await expect(
-      findChannelCategoryTool('time_move_channel_to_category').handler(
+      findChannelCategoryTool('move_channel_to_category').handler(
         client,
         { team_id: 'team-1', channel_id: 'channel-1', category_id: 'missing' },
         userId
@@ -786,7 +787,7 @@ describe('channel category tools', () => {
       });
 
       await expect(
-        findChannelCategoryTool('time_move_channel_to_category').handler(
+        findChannelCategoryTool('move_channel_to_category').handler(
           client,
           { team_id: 'team-1', channel_id: 'channel-1', category_id: destination.id },
           userId
@@ -836,7 +837,7 @@ describe('channel category tools', () => {
       ]),
     });
 
-    await findChannelCategoryTool('time_move_channel_to_category').handler(
+    await findChannelCategoryTool('move_channel_to_category').handler(
       client,
       { team_id: 'team-1', channel_id: 'channel-1', category_id: destination.id },
       userId
@@ -866,7 +867,7 @@ describe('channel category tools', () => {
       ]),
     });
 
-    const result = await findChannelCategoryTool('time_move_channel_to_category').handler(
+    const result = await findChannelCategoryTool('move_channel_to_category').handler(
       client,
       { team_id: 'team-1', channel_id: 'channel-1', category_id: destination.id },
       userId
@@ -899,7 +900,7 @@ describe('channel category tools', () => {
     });
 
     await expect(
-      findChannelCategoryTool('time_move_channel_to_category').handler(
+      findChannelCategoryTool('move_channel_to_category').handler(
         client,
         { team_id: 'team-1', channel_id: 'channel-1', category_id: destination.id },
         userId
@@ -919,7 +920,7 @@ describe('channel category tools', () => {
     });
 
     await expect(
-      findChannelCategoryTool('time_move_channel_to_category').handler(
+      findChannelCategoryTool('move_channel_to_category').handler(
         client,
         { team_id: 'team-1', channel_id: 'channel-1', category_id: destination.id },
         userId
@@ -938,7 +939,7 @@ describe('channel category tools', () => {
       }),
     });
 
-    const result = await findChannelCategoryTool('time_move_channel_to_category').handler(
+    const result = await findChannelCategoryTool('move_channel_to_category').handler(
       client,
       { team_id: 'team-1', channel_id: 'channel-1', category_id: destination.id },
       userId
@@ -968,7 +969,7 @@ describe('channel category tools', () => {
       ]),
     });
 
-    await findChannelCategoryTool('time_set_channel_favorite').handler(
+    await findChannelCategoryTool('set_channel_favorite').handler(
       client,
       { team_id: 'team-1', channel_id: 'channel-1', favorite: true },
       userId
@@ -1005,7 +1006,7 @@ describe('channel category tools', () => {
       ]),
     });
 
-    await findChannelCategoryTool('time_set_channel_favorite').handler(
+    await findChannelCategoryTool('set_channel_favorite').handler(
       client,
       { team_id: 'team-1', channel_id: 'channel-1', favorite: false },
       userId
@@ -1039,7 +1040,7 @@ describe('channel category tools', () => {
       });
 
       await expect(
-        findChannelCategoryTool('time_set_channel_favorite').handler(
+        findChannelCategoryTool('set_channel_favorite').handler(
           client,
           { team_id: 'team-1', channel_id: 'channel-1', favorite },
           userId
@@ -1063,13 +1064,162 @@ describe('channel category tools', () => {
       });
 
       await expect(
-        findChannelCategoryTool('time_set_channel_favorite').handler(
+        findChannelCategoryTool('set_channel_favorite').handler(
           client,
           { team_id: 'team-1', channel_id: 'channel-1', favorite },
           userId
         )
       ).rejects.toThrow(new RegExp(`required.*${requiredType}`, 'i'));
       expect(client.updateChannelCategories).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects renaming non-custom categories but allows their other metadata', async () => {
+    const channels = createCategory({ id: 'channels', type: 'channels', display_name: 'Channels' });
+    client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({ categories: [channels], order: [channels.id] }),
+      updateChannelCategory: vi.fn().mockResolvedValue({ ...channels, collapsed: true }),
+    });
+    const tool = findChannelCategoryTool('update_channel_category');
+
+    await expect(
+      tool.handler(client, { team_id: 'team-1', category_id: channels.id, display_name: 'Renamed' }, userId)
+    ).rejects.toThrow(/only custom/i);
+    expect(client.updateChannelCategory).not.toHaveBeenCalled();
+
+    await tool.handler(client, { team_id: 'team-1', category_id: channels.id, collapsed: true }, userId);
+    expect(client.updateChannelCategory).toHaveBeenCalledWith(userId, 'team-1', channels.id, { ...channels, collapsed: true });
+  });
+
+  it.each(['channels', 'favorites', 'direct_messages', 'managed'] as const)(
+    'rejects deleting a %s category',
+    async (type) => {
+      const category = createCategory({ id: `${type}-category`, type });
+      client = createMockClient({
+        getChannelCategories: vi.fn().mockResolvedValue({ categories: [category], order: [category.id] }),
+      });
+
+      await expect(
+        findChannelCategoryTool('delete_channel_category').handler(
+          client,
+          { team_id: 'team-1', category_id: category.id },
+          userId
+        )
+      ).rejects.toThrow(/only custom/i);
+      expect(client.deleteChannelCategory).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects deleting a missing category', async () => {
+    await expect(
+      findChannelCategoryTool('delete_channel_category').handler(
+        client,
+        { team_id: 'team-1', category_id: 'missing' },
+        userId
+      )
+    ).rejects.toThrow(/not found/i);
+    expect(client.deleteChannelCategory).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: 'incomplete', ids: ['category-1'], error: /missing: category-2/ },
+    { label: 'unknown', ids: ['category-1', 'category-2', 'other'], error: /unknown: other/ },
+    { label: 'duplicated', ids: ['category-1', 'category-2', 'category-1'], error: /duplicate/ },
+  ])('rejects an $label category order before calling the server', async ({ ids, error }) => {
+    const first = createCategory({ id: 'category-1' });
+    const second = createCategory({ id: 'category-2' });
+    client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({ categories: [first, second], order: [first.id, second.id] }),
+    });
+
+    await expect(
+      findChannelCategoryTool('reorder_channel_categories').handler(
+        client,
+        { team_id: 'team-1', category_ids: ids },
+        userId
+      )
+    ).rejects.toThrow(error);
+    expect(client.reorderChannelCategories).not.toHaveBeenCalled();
+  });
+
+  it('removes a direct message from Direct Messages when moving it to a custom category', async () => {
+    const directMessages = createCategory({ id: 'dms', type: 'direct_messages', channel_ids: ['dm-1', 'dm-2'] });
+    const destination = createCategory({ id: 'destination', channel_ids: [] });
+    client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({
+        categories: [directMessages, destination],
+        order: [directMessages.id, destination.id],
+      }),
+      updateChannelCategories: vi.fn().mockResolvedValue([
+        { ...directMessages, channel_ids: ['dm-2'] },
+        { ...destination, channel_ids: ['dm-1'] },
+      ]),
+    });
+
+    await findChannelCategoryTool('move_channel_to_category').handler(
+      client,
+      { team_id: 'team-1', channel_id: 'dm-1', category_id: destination.id },
+      userId
+    );
+
+    expect(client.updateChannelCategories).toHaveBeenCalledWith(userId, 'team-1', [
+      { ...directMessages, channel_ids: ['dm-2'] },
+      { ...destination, channel_ids: ['dm-1'] },
+    ]);
+  });
+
+  it.each([
+    { favorite: true, favorites: ['channel-1'], message: /already favorited/ },
+    { favorite: false, favorites: [], message: /already not favorited/ },
+  ])('treats favorite=$favorite as a no-op when the state already matches', async ({ favorite, favorites, message }) => {
+    const favoritesCategory = createCategory({ id: 'favorites', type: 'favorites', channel_ids: favorites });
+    const custom = createCategory({ id: 'custom', channel_ids: favorite ? [] : ['channel-1'] });
+    client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({
+        categories: [favoritesCategory, custom],
+        order: [favoritesCategory.id, custom.id],
+      }),
+    });
+
+    const result = await findChannelCategoryTool('set_channel_favorite').handler(
+      client,
+      { team_id: 'team-1', channel_id: 'channel-1', favorite },
+      userId
+    );
+
+    expect(result.content[0].text).toMatch(message);
+    expect(client.updateChannelCategories).not.toHaveBeenCalled();
+  });
+
+  it.each(['D', 'G'] as const)(
+    'unfavorites a %s channel back into Direct Messages',
+    async (channelType) => {
+      const favorites = createCategory({ id: 'favorites', type: 'favorites', channel_ids: ['dm-1'] });
+      const channels = createCategory({ id: 'channels', type: 'channels', channel_ids: [] });
+      const directMessages = createCategory({ id: 'dms', type: 'direct_messages', channel_ids: ['dm-2'] });
+      client = createMockClient({
+        getChannelCategories: vi.fn().mockResolvedValue({
+          categories: [favorites, channels, directMessages],
+          order: [favorites.id, channels.id, directMessages.id],
+        }),
+        getChannel: vi.fn().mockResolvedValue({ id: 'dm-1', type: channelType } as Channel),
+        updateChannelCategories: vi.fn().mockResolvedValue([
+          { ...favorites, channel_ids: [] },
+          { ...directMessages, channel_ids: ['dm-2', 'dm-1'] },
+        ]),
+      });
+
+      await findChannelCategoryTool('set_channel_favorite').handler(
+        client,
+        { team_id: 'team-1', channel_id: 'dm-1', favorite: false },
+        userId
+      );
+
+      expect(client.getChannel).toHaveBeenCalledWith('dm-1');
+      expect(client.updateChannelCategories).toHaveBeenCalledWith(userId, 'team-1', [
+        { ...favorites, channel_ids: [] },
+        { ...directMessages, channel_ids: ['dm-2', 'dm-1'] },
+      ]);
     }
   );
 });
