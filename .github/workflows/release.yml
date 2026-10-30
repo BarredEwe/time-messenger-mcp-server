@@ -39,7 +39,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
 
       - run: npm ci
       - run: npm run typecheck
@@ -78,12 +77,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: gh release create "v$VERSION" --title "v$VERSION" --verify-tag --generate-notes
 
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 22 ships npm 10.
+      - run: npm install -g npm@11
+
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN secret is not set, skipping npm publish."
-            exit 0
-          fi
-          npm publish --provenance --access public
+        run: npm publish --access public
