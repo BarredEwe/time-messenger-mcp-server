@@ -13,13 +13,14 @@ import { loadSavedAuth, saveAuth } from './client/auth-store.js';
 import { messageTools } from './tools/messages.js';
 import { threadTools } from './tools/threads.js';
 import { channelTools } from './tools/channels.js';
+import { channelCategoryTools } from './tools/channel-categories.js';
 import { teamTools } from './tools/teams.js';
 import { userTools } from './tools/users.js';
 import { authTools } from './tools/auth.js';
 import type { MfaLoginResult } from './tools/auth.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const allTools: any[] = [...authTools, ...messageTools, ...threadTools, ...channelTools, ...teamTools, ...userTools];
+const allTools: any[] = [...authTools, ...messageTools, ...threadTools, ...channelTools, ...channelCategoryTools, ...teamTools, ...userTools];
 
 class TimeMcpServer {
   private server: Server;

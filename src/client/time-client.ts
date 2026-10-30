@@ -2,6 +2,10 @@ import type {
   User,
   Team,
   Channel,
+  ChannelCategory,
+  ChannelCategoryList,
+  ChannelCategoryOrder,
+  CreateChannelCategoryRequest,
   Post,
   PostList,
   Thread,
@@ -11,6 +15,8 @@ import type {
   MarkChannelReadFailure,
   MarkChannelsReadResult,
   TeamUnread,
+  UpdateChannelCategoriesRequest,
+  UpdateChannelCategoryRequest,
   SearchResult,
   ErrorInfo,
 } from '../types/time-api.js';
@@ -326,6 +332,69 @@ export class TimeClient {
     return this.request<ChannelUnread>(
       'GET',
       `/users/${enc(userId)}/channels/${enc(channelId)}/unread`
+    );
+  }
+
+  async getChannelCategories(userId: string, teamId: string): Promise<ChannelCategoryList> {
+    return this.request<ChannelCategoryList>(
+      'GET',
+      `/users/${enc(userId)}/teams/${enc(teamId)}/channels/categories`
+    );
+  }
+
+  async createChannelCategory(
+    userId: string,
+    teamId: string,
+    category: CreateChannelCategoryRequest
+  ): Promise<ChannelCategory> {
+    return this.request<ChannelCategory>(
+      'POST',
+      `/users/${enc(userId)}/teams/${enc(teamId)}/channels/categories`,
+      { ...category, user_id: userId, team_id: teamId }
+    );
+  }
+
+  async updateChannelCategory(
+    userId: string,
+    teamId: string,
+    categoryId: string,
+    category: UpdateChannelCategoryRequest
+  ): Promise<ChannelCategory> {
+    return this.request<ChannelCategory>(
+      'PUT',
+      `/users/${enc(userId)}/teams/${enc(teamId)}/channels/categories/${enc(categoryId)}`,
+      category
+    );
+  }
+
+  async deleteChannelCategory(userId: string, teamId: string, categoryId: string): Promise<void> {
+    return this.request<void>(
+      'DELETE',
+      `/users/${enc(userId)}/teams/${enc(teamId)}/channels/categories/${enc(categoryId)}`
+    );
+  }
+
+  async reorderChannelCategories(
+    userId: string,
+    teamId: string,
+    categoryIds: ChannelCategoryOrder
+  ): Promise<ChannelCategoryOrder> {
+    return this.request<ChannelCategoryOrder>(
+      'PUT',
+      `/users/${enc(userId)}/teams/${enc(teamId)}/channels/categories/order`,
+      categoryIds
+    );
+  }
+
+  async updateChannelCategories(
+    userId: string,
+    teamId: string,
+    categories: UpdateChannelCategoriesRequest
+  ): Promise<readonly ChannelCategory[]> {
+    return this.request<readonly ChannelCategory[]>(
+      'PUT',
+      `/users/${enc(userId)}/teams/${enc(teamId)}/channels/categories`,
+      categories
     );
   }
 
