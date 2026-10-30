@@ -579,6 +579,143 @@ describe('TimeClient', () => {
     });
   });
 
+  describe('Channel category methods', () => {
+    const category = {
+      id: 'category#value',
+      user_id: 'user/value',
+      team_id: 'team?value',
+      sort_order: 10,
+      sorting: 'manual',
+      type: 'custom',
+      display_name: 'Projects',
+      muted: false,
+      collapsed: false,
+      channel_ids: ['channel-1'],
+    } as const;
+
+    it('getChannelCategories calls the encoded user and team route', async () => {
+      const response = { categories: [category], order: [category.id] };
+      fetchSpy.mockReturnValue(mockFetchResponse(response));
+
+      const result = await client.getChannelCategories(category.user_id, category.team_id);
+
+      expect(result).toEqual(response);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fvalue/teams/team%3Fvalue/channels/categories',
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+
+    it('createChannelCategory posts the category request with path IDs', async () => {
+      const request = {
+        display_name: category.display_name,
+        type: category.type,
+        channel_ids: [],
+      } as const;
+      fetchSpy.mockReturnValue(mockFetchResponse(category));
+
+      const result = await client.createChannelCategory(category.user_id, category.team_id, request);
+
+      expect(result).toEqual(category);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fvalue/teams/team%3Fvalue/channels/categories',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ ...request, user_id: category.user_id, team_id: category.team_id }),
+        })
+      );
+    });
+
+    it('updateChannelCategory puts the complete category on the encoded category route', async () => {
+      const updatedCategory = { ...category, display_name: 'Renamed Projects' };
+      fetchSpy.mockReturnValue(mockFetchResponse(updatedCategory));
+
+      const result = await client.updateChannelCategory(
+        category.user_id,
+        category.team_id,
+        category.id,
+        updatedCategory
+      );
+
+      expect(result).toEqual(updatedCategory);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fvalue/teams/team%3Fvalue/channels/categories/category%23value',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(updatedCategory),
+        })
+      );
+    });
+
+    it('deleteChannelCategory uses the encoded category route and existing 204 handling', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({}, 204));
+
+      const result = await client.deleteChannelCategory(category.user_id, category.team_id, category.id);
+
+      expect(result).toEqual({});
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fvalue/teams/team%3Fvalue/channels/categories/category%23value',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+
+    it('reorderChannelCategories puts a raw category ID array', async () => {
+      const categoryIds = ['category-2', category.id] as const;
+      fetchSpy.mockReturnValue(mockFetchResponse(categoryIds));
+
+      const result = await client.reorderChannelCategories(category.user_id, category.team_id, categoryIds);
+
+      expect(result).toEqual(categoryIds);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fvalue/teams/team%3Fvalue/channels/categories/order',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(categoryIds),
+        })
+      );
+    });
+
+    it('updateChannelCategories puts and returns a raw category array', async () => {
+      const categories = [category] as const;
+      fetchSpy.mockReturnValue(mockFetchResponse(categories));
+
+      const result = await client.updateChannelCategories(category.user_id, category.team_id, categories);
+
+      expect(result).toEqual(categories);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fvalue/teams/team%3Fvalue/channels/categories',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify(categories),
+        })
+      );
+    });
+
+    it('propagates TimeApiError details from category requests', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse(
+        {
+          id: 'api.context.permissions.app_error',
+          message: 'Forbidden',
+          request_id: 'request-1',
+          status_code: 403,
+          where: 'GetSidebarCategoriesForTeamForUser',
+        },
+        403
+      ));
+
+      await expect(client.getChannelCategories(category.user_id, category.team_id)).rejects.toMatchObject({
+        name: 'TimeApiError',
+        statusCode: 403,
+        message: 'Forbidden',
+        errorInfo: {
+          id: 'api.context.permissions.app_error',
+          request_id: 'request-1',
+          status_code: 403,
+        },
+      });
+    });
+  });
+
   describe('Post methods', () => {
     it('createPost calls POST /posts with body', async () => {
       fetchSpy.mockReturnValue(mockFetchResponse({ id: 'p1' }));

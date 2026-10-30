@@ -50,6 +50,45 @@ export interface Channel {
   shared: boolean
 }
 
+export type ChannelCategorySorting = '' | 'manual' | 'recent' | 'alpha'
+
+export type ChannelCategoryType =
+  | 'channels'
+  | 'custom'
+  | 'direct_messages'
+  | 'favorites'
+  | 'managed'
+
+export interface ChannelCategory {
+  readonly id: string
+  readonly user_id: string
+  readonly team_id: string
+  readonly sort_order: number
+  readonly sorting: ChannelCategorySorting
+  readonly type: ChannelCategoryType
+  readonly display_name: string
+  readonly muted: boolean
+  readonly collapsed: boolean
+  readonly channel_ids: readonly string[]
+}
+
+export interface ChannelCategoryList {
+  readonly categories: readonly ChannelCategory[]
+  readonly order: readonly string[]
+}
+
+export interface CreateChannelCategoryRequest {
+  readonly display_name: string
+  readonly type: 'custom'
+  readonly channel_ids: readonly string[]
+}
+
+export type UpdateChannelCategoryRequest = ChannelCategory
+
+export type ChannelCategoryOrder = readonly string[]
+
+export type UpdateChannelCategoriesRequest = readonly ChannelCategory[]
+
 export interface Post {
   id: string
   create_at: number
