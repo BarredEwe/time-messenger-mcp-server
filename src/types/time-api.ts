@@ -108,6 +108,13 @@ export interface Post {
   metadata: Record<string, any>
 }
 
+export interface Reaction {
+  user_id: string
+  post_id: string
+  emoji_name: string
+  create_at: number
+}
+
 export interface PostList {
   order: string[]
   posts: Record<string, Post>
@@ -132,8 +139,13 @@ export interface ThreadStats {
   total_unread_mentions: number
 }
 
+/**
+ * Response of GET /users/{user_id}/teams/{team_id}/threads. The endpoint
+ * returns a wrapper object rather than a bare array, and `threads` is null
+ * when the user follows no threads.
+ */
 export interface ThreadsResponse {
-  threads: Thread[]
+  threads: Thread[] | null
   total: number
   total_unread_threads: number
   total_unread_mentions: number

@@ -91,6 +91,47 @@ describe('formatPostList', () => {
   });
 });
 
+describe('post identity in output', () => {
+  it('includes the post ID so replies can target the thread', () => {
+    const post = makePost({ id: 'p1', message: 'Hello' });
+    expect(formatPostList(makePostList([post]))).toContain('Post ID: p1');
+  });
+
+  it('includes the root ID for replies', () => {
+    const reply = makePost({ id: 'p2', message: 'Reply', root_id: 'p1' });
+    expect(formatPostList(makePostList([reply]))).toContain('Root ID: p1');
+  });
+
+  it('renders the resolved username when authors are provided', () => {
+    const post = makePost({ id: 'p1', message: 'Hello', user_id: 'u1' });
+    const authors = new Map([['u1', 'i.knapp']]);
+    expect(formatPostList(makePostList([post]), authors)).toContain('@i.knapp');
+  });
+
+  it('falls back to the raw user_id without an authors map', () => {
+    const post = makePost({ id: 'p1', message: 'Hello', user_id: 'u1' });
+    expect(formatPostList(makePostList([post]))).toContain('u1');
+  });
+
+  it('includes IDs and author in search results too', () => {
+    const post = makePost({ id: 'p1', message: 'Found', user_id: 'u1' });
+    const result = formatSearchResult(
+      { order: ['p1'], posts: { p1: post } },
+      new Map([['u1', 'i.knapp']])
+    );
+    expect(result).toContain('Post ID: p1');
+    expect(result).toContain('@i.knapp');
+  });
+
+  it('orders search results oldest-first, like channel messages', () => {
+    const p1 = makePost({ id: 'p1', message: 'Older', create_at: 1000 });
+    const p2 = makePost({ id: 'p2', message: 'Newer', create_at: 2000 });
+    // Search API returns newest-first.
+    const result = formatSearchResult({ order: ['p2', 'p1'], posts: { p1, p2 } });
+    expect(result.indexOf('Older')).toBeLessThan(result.indexOf('Newer'));
+  });
+});
+
 describe('formatSearchResult', () => {
   it('returns "No messages found" for empty result', () => {
     const result = formatSearchResult({ order: [], posts: {} });
