@@ -8,7 +8,10 @@ import type {
   Thread,
   UserThreads,
   ThreadStats,
+  ThreadsResponse,
   ChannelUnread,
+  MarkChannelReadFailure,
+  MarkChannelsReadResult,
   TeamUnread,
   SearchResult,
   ErrorInfo,
@@ -21,6 +24,11 @@ import { TimeApiError } from '../types/time-api.js';
 const enc = encodeURIComponent;
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MARK_READ_CONCURRENCY = 5;
+const MARK_READ_MAX_ATTEMPTS = 3;
+const MARK_READ_RETRY_BASE_DELAY_MS = 100;
+const MARK_READ_MAX_RETRY_DELAY_MS = 30_000;
+const MARK_READ_RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 function requestTimeoutMs(): number {
   const parsed = Number.parseInt(process.env.TIME_REQUEST_TIMEOUT_MS ?? '', 10);
@@ -129,9 +137,22 @@ export class TimeClient {
     });
 
     if (!response.ok) {
+      const retryAfterHeader = response.headers.get('Retry-After');
+      const retryAfterSeconds = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader);
+      const retryAfterDate = retryAfterHeader === null ? Number.NaN : Date.parse(retryAfterHeader);
+      let retryAfterMs: number | undefined;
+      if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+        retryAfterMs = Math.min(retryAfterSeconds * 1_000, MARK_READ_MAX_RETRY_DELAY_MS);
+      } else if (!Number.isNaN(retryAfterDate)) {
+        retryAfterMs = Math.min(
+          Math.max(0, retryAfterDate - Date.now()),
+          MARK_READ_MAX_RETRY_DELAY_MS
+        );
+      }
       const error = new TimeApiError(
         `Time API Error: ${response.status} ${response.statusText}`,
-        response.status
+        response.status,
+        retryAfterMs
       );
       try {
         const errorBody = (await response.json()) as ErrorInfo;
@@ -204,6 +225,100 @@ export class TimeClient {
       'GET',
       `/users/${enc(userId)}/teams/${enc(teamId)}/channels`
     );
+  }
+
+  async getAllChannelsForUser(userId: string): Promise<Channel[]> {
+    return this.request<Channel[]>('GET', `/users/${enc(userId)}/channels`);
+  }
+
+  private async markChannelRead(
+    userId: string,
+    channelId: string
+  ): Promise<MarkChannelReadFailure | undefined> {
+    let attempts = 0;
+
+    while (true) {
+      attempts += 1;
+      try {
+        await this.request<void>(
+          'POST',
+          `/channels/members/${enc(userId)}/view`,
+          { channel_id: channelId }
+        );
+        return undefined;
+      } catch (error) {
+        if (error instanceof TimeApiError) {
+          if (!MARK_READ_RETRYABLE_STATUSES.has(error.statusCode) || attempts >= MARK_READ_MAX_ATTEMPTS) {
+            return {
+              channelId,
+              message: error.message,
+              statusCode: error.statusCode,
+            };
+          }
+
+          const backoffMs = MARK_READ_RETRY_BASE_DELAY_MS * (2 ** (attempts - 1));
+          const delayMs = error.retryAfterMs ?? backoffMs + Math.floor(Math.random() * MARK_READ_RETRY_BASE_DELAY_MS);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        if (error instanceof TypeError) {
+          if (attempts >= MARK_READ_MAX_ATTEMPTS) {
+            return { channelId, message: error.message };
+          }
+
+          const backoffMs = MARK_READ_RETRY_BASE_DELAY_MS * (2 ** (attempts - 1));
+          await new Promise(resolve => setTimeout(
+            resolve,
+            backoffMs + Math.floor(Math.random() * MARK_READ_RETRY_BASE_DELAY_MS)
+          ));
+          continue;
+        }
+
+        throw error;
+      }
+    }
+  }
+
+  async markChannelsRead(userId: string, channelIds: string[]): Promise<MarkChannelsReadResult> {
+    const uniqueChannelIds = [...new Set(channelIds)];
+    const successes: string[] = [];
+    const failures: MarkChannelReadFailure[] = [];
+
+    for (let start = 0; start < uniqueChannelIds.length; start += MARK_READ_CONCURRENCY) {
+      const chunk = uniqueChannelIds.slice(start, start + MARK_READ_CONCURRENCY);
+      const chunkResults = await Promise.allSettled(
+        chunk.map(async channelId => ({
+          channelId,
+          failure: await this.markChannelRead(userId, channelId),
+        }))
+      );
+      let firstUnexpectedError: unknown;
+      let hasUnexpectedError = false;
+
+      for (const result of chunkResults) {
+        if (result.status === 'rejected') {
+          if (!hasUnexpectedError) {
+            firstUnexpectedError = result.reason;
+            hasUnexpectedError = true;
+          }
+          continue;
+        }
+
+        const { channelId, failure } = result.value;
+        if (failure) {
+          failures.push(failure);
+        } else {
+          successes.push(channelId);
+        }
+      }
+
+      if (hasUnexpectedError) {
+        throw firstUnexpectedError;
+      }
+    }
+
+    return { successes, failures };
   }
 
   async getChannel(channelId: string): Promise<Channel> {
@@ -307,14 +422,15 @@ export class TimeClient {
     );
   }
 
-  async getThreadsStats(
-    userId: string,
-    teamId: string
-  ): Promise<ThreadStats> {
-    return this.request<ThreadStats>(
+  async getThreadsStats(userId: string, teamId: string): Promise<ThreadStats> {
+    const response = await this.request<ThreadsResponse>(
       'GET',
-      `/users/${enc(userId)}/teams/${enc(teamId)}/threads/stats`
+      `/users/${enc(userId)}/teams/${enc(teamId)}/threads?totalsOnly=true`
     );
+    return {
+      total_unread_threads: response.total_unread_threads,
+      total_unread_mentions: response.total_unread_mentions,
+    };
   }
 
   async getUserThread(

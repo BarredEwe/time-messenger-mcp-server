@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { TimeClient } from '../client/time-client.js';
 import { TimeApiError } from '../types/time-api.js';
 
@@ -22,6 +22,12 @@ describe('TimeClient', () => {
     fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
     client = new TimeClient('https://time.test.com', 'test-token');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   describe('constructor', () => {
@@ -230,6 +236,312 @@ describe('TimeClient', () => {
   });
 
   describe('Channel methods', () => {
+    it('getAllChannelsForUser calls the user-scoped channel endpoint', async () => {
+      const channels = [{ id: 'ch1', type: 'O' }, { id: 'ch2', type: 'D' }];
+      fetchSpy.mockReturnValue(mockFetchResponse(channels));
+
+      const result = await client.getAllChannelsForUser('user/one');
+
+      expect(result).toEqual(channels);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/user%2Fone/channels',
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+
+    it('posts one Time view request per unique channel when marking channels read', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({}, 204));
+
+      const result = await client.markChannelsRead('user/one', ['ch1', 'ch1', 'ch2']);
+
+      expect(result).toEqual({ successes: ['ch1', 'ch2'], failures: [] });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls).toEqual([
+        [
+          'https://time.test.com/api/v4/channels/members/user%2Fone/view',
+          expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({
+              Authorization: 'Bearer test-token',
+              'Content-Type': 'application/json',
+            }),
+            body: JSON.stringify({ channel_id: 'ch1' }),
+          }),
+        ],
+        [
+          'https://time.test.com/api/v4/channels/members/user%2Fone/view',
+          expect.objectContaining({
+            method: 'POST',
+            body: JSON.stringify({ channel_id: 'ch2' }),
+          }),
+        ],
+      ]);
+    });
+
+    it('starts at most five requests and waits for the current ordered chunk', async () => {
+      vi.useFakeTimers();
+      let activeRequests = 0;
+      let maximumActiveRequests = 0;
+      fetchSpy.mockImplementation(async () => {
+        activeRequests += 1;
+        maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        activeRequests -= 1;
+        return mockFetchResponse({}, 204);
+      });
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1', 'ch2', 'ch3', 'ch4', 'ch5', 'ch6']);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(5);
+      expect(maximumActiveRequests).toBe(5);
+
+      await vi.runAllTimersAsync();
+      await expect(resultPromise).resolves.toEqual({
+        successes: ['ch1', 'ch2', 'ch3', 'ch4', 'ch5', 'ch6'],
+        failures: [],
+      });
+      expect(maximumActiveRequests).toBe(5);
+    });
+
+    it('waits for started siblings before propagating an unexpected chunk error', async () => {
+      const programmingError = new RangeError('broken test adapter');
+      let settleSibling = () => {};
+      const pendingSibling = new Promise<Response>(resolve => {
+        settleSibling = () => resolve(mockFetchResponse({}, 204));
+      });
+      fetchSpy.mockImplementation((_url: string, options: RequestInit) => {
+        const body = String(options.body);
+        if (body === JSON.stringify({ channel_id: 'ch1' })) {
+          return Promise.reject(programmingError);
+        }
+        if (body === JSON.stringify({ channel_id: 'ch2' })) {
+          return pendingSibling;
+        }
+        return mockFetchResponse({}, 204);
+      });
+
+      const resultPromise = client.markChannelsRead(
+        'u1',
+        ['ch1', 'ch2', 'ch3', 'ch4', 'ch5', 'ch6']
+      );
+      const settlementSpy = vi.fn();
+      void resultPromise.then(settlementSpy, settlementSpy);
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(settlementSpy).not.toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalledTimes(5);
+
+      settleSibling();
+      await expect(resultPromise).rejects.toBe(programmingError);
+      expect(fetchSpy).toHaveBeenCalledTimes(5);
+    });
+
+    it.each([429, 502, 503, 504])('retries status %i before returning success', async status => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      fetchSpy
+        .mockReturnValueOnce(mockFetchResponse({ message: 'Temporary failure' }, status))
+        .mockReturnValueOnce(mockFetchResponse({}, 204));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toEqual({ successes: ['ch1'], failures: [] });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([400, 401, 403, 404])('does not retry status %i and returns the failure as data', async status => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ message: 'Permanent failure' }, status));
+
+      const result = await client.markChannelsRead('u1', ['ch1']);
+
+      expect(result).toEqual({
+        successes: [],
+        failures: [{ channelId: 'ch1', message: 'Permanent failure', statusCode: status }],
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries network TypeError at most three total attempts', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      fetchSpy.mockRejectedValue(new TypeError('network unavailable'));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toEqual({
+        successes: [],
+        failures: [{ channelId: 'ch1', message: 'network unavailable' }],
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it('honors Retry-After delta seconds before retrying', async () => {
+      vi.useFakeTimers();
+      fetchSpy
+        .mockReturnValueOnce(mockFetchResponse(
+          { message: 'Rate limited' },
+          429,
+          { 'Retry-After': '2' }
+        ))
+        .mockReturnValueOnce(mockFetchResponse({}, 204));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.advanceTimersByTimeAsync(1_999);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resultPromise).resolves.toEqual({ successes: ['ch1'], failures: [] });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('honors Retry-After HTTP dates before retrying', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-07T12:00:00.000Z'));
+      fetchSpy
+        .mockReturnValueOnce(mockFetchResponse(
+          { message: 'Unavailable' },
+          503,
+          { 'Retry-After': 'Mon, 07 Sep 2026 12:00:02 GMT' }
+        ))
+        .mockReturnValueOnce(mockFetchResponse({}, 204));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.advanceTimersByTimeAsync(1_999);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resultPromise).resolves.toEqual({ successes: ['ch1'], failures: [] });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('caps huge numeric Retry-After delays at thirty seconds', async () => {
+      vi.useFakeTimers();
+      fetchSpy
+        .mockReturnValueOnce(mockFetchResponse(
+          { message: 'Rate limited' },
+          429,
+          { 'Retry-After': '86400' }
+        ))
+        .mockReturnValueOnce(mockFetchResponse({}, 204));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.advanceTimersByTimeAsync(29_999);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resultPromise).resolves.toEqual({ successes: ['ch1'], failures: [] });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('caps far-future Retry-After dates at thirty seconds', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-07T12:00:00.000Z'));
+      fetchSpy
+        .mockReturnValueOnce(mockFetchResponse(
+          { message: 'Unavailable' },
+          503,
+          { 'Retry-After': 'Tue, 07 Sep 2027 12:00:00 GMT' }
+        ))
+        .mockReturnValueOnce(mockFetchResponse({}, 204));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.advanceTimersByTimeAsync(29_999);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resultPromise).resolves.toEqual({ successes: ['ch1'], failures: [] });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('uses exponential backoff with jitter when Retry-After is absent', async () => {
+      vi.useFakeTimers();
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+      fetchSpy
+        .mockReturnValueOnce(mockFetchResponse({ message: 'Unavailable' }, 503))
+        .mockReturnValueOnce(mockFetchResponse({ message: 'Unavailable' }, 503))
+        .mockReturnValueOnce(mockFetchResponse({}, 204));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(199);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resultPromise).resolves.toEqual({ successes: ['ch1'], failures: [] });
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(randomSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns successes and terminal failures in input order', async () => {
+      vi.useFakeTimers();
+      fetchSpy.mockImplementation((url: string, options: RequestInit) => {
+        const body = String(options.body);
+        const delay = body === JSON.stringify({ channel_id: 'ch1' })
+          ? 20
+          : body === JSON.stringify({ channel_id: 'ch2' })
+            ? 10
+            : 0;
+        const status = body === JSON.stringify({ channel_id: 'ch2' }) ? 403 : 204;
+        return new Promise(resolve => {
+          setTimeout(() => resolve(mockFetchResponse({ message: 'Forbidden' }, status)), delay);
+        });
+      });
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1', 'ch2', 'ch3']);
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toEqual({
+        successes: ['ch1', 'ch3'],
+        failures: [{ channelId: 'ch2', message: 'Forbidden', statusCode: 403 }],
+      });
+    });
+
+    it('returns exhausted request timeouts as status 504 failures', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('TIME_REQUEST_TIMEOUT_MS', '10');
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      fetchSpy.mockImplementation((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }));
+
+      const resultPromise = client.markChannelsRead('u1', ['ch1']);
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toEqual({
+        successes: [],
+        failures: [{
+          channelId: 'ch1',
+          message: 'Time API request timed out after 10ms',
+          statusCode: 504,
+        }],
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it('propagates unexpected programming errors without retrying', async () => {
+      const programmingError = new RangeError('broken test adapter');
+      fetchSpy.mockRejectedValue(programmingError);
+
+      await expect(client.markChannelsRead('u1', ['ch1'])).rejects.toBe(programmingError);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('getChannelsForUser calls correct path', async () => {
       fetchSpy.mockReturnValue(mockFetchResponse([]));
       await client.getChannelsForUser('u1', 't1');
@@ -397,13 +709,34 @@ describe('TimeClient', () => {
       );
     });
 
-    it('getThreadsStats calls correct path', async () => {
-      fetchSpy.mockReturnValue(mockFetchResponse({ total_unread_threads: 3, total_unread_mentions: 1 }));
-      await client.getThreadsStats('u1', 't1');
+    it('getThreadsStats requests totals only and returns nonzero unread totals', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({
+        threads: [],
+        total: 3,
+        total_unread_threads: 3,
+        total_unread_mentions: 1,
+      }));
+      const result = await client.getThreadsStats('u1', 't1');
       expect(fetchSpy).toHaveBeenCalledWith(
-        'https://time.test.com/api/v4/users/u1/teams/t1/threads/stats',
+        'https://time.test.com/api/v4/users/u1/teams/t1/threads?totalsOnly=true',
         expect.anything()
       );
+      expect(result).toEqual({ total_unread_threads: 3, total_unread_mentions: 1 });
+    });
+
+    it('getThreadsStats preserves numeric zero unread totals', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({
+        threads: [],
+        total: 0,
+        total_unread_threads: 0,
+        total_unread_mentions: 0,
+      }));
+      const result = await client.getThreadsStats('u1', 't1');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/u1/teams/t1/threads?totalsOnly=true',
+        expect.anything()
+      );
+      expect(result).toEqual({ total_unread_threads: 0, total_unread_mentions: 0 });
     });
 
     it('getUserThread calls correct path', async () => {

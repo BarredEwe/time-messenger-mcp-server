@@ -1,6 +1,23 @@
 import { z } from 'zod';
 import type { TimeClient } from '../client/time-client.js';
-import type { Channel } from '../types/time-api.js';
+import type { Channel, MarkChannelsReadResult } from '../types/time-api.js';
+
+function formatMarkChannelsReadResult(result: MarkChannelsReadResult): string {
+  if (result.failures.length === 0) {
+    return `Marked ${result.successes.length} channel(s) as read.`;
+  }
+
+  const attemptedCount = result.successes.length + result.failures.length;
+  const summary = result.successes.length === 0
+    ? `Failed to mark ${attemptedCount} channel(s) as read.`
+    : `Marked ${result.successes.length} of ${attemptedCount} channel(s) as read.`;
+  const failures = result.failures.map((failure) => {
+    const status = failure.statusCode === undefined ? '' : ` (status ${failure.statusCode})`;
+    return `- ${failure.channelId}: ${failure.message}${status}`;
+  });
+
+  return `${summary}\nFailed channels:\n${failures.join('\n')}`;
+}
 
 export const channelTools = [
   {
@@ -133,6 +150,67 @@ export const channelTools = [
           },
         ],
       };
+    },
+  },
+
+  {
+    name: 'mark_channels_read',
+    description: 'Mark all available channels or selected channel IDs as read; this action cannot be undone. The all mode includes public, private, DM, and group channels. Followed threads are excluded; use mark_thread_read for threads.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['all', 'selected'],
+        },
+        channel_ids: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 100,
+          items: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+      },
+      required: ['mode'],
+      additionalProperties: false,
+    },
+    handler: async (client: TimeClient, args: unknown, userId: string) => {
+      const schema = z.discriminatedUnion('mode', [
+        z.object({ mode: z.literal('all') }).strict(),
+        z.object({
+          mode: z.literal('selected'),
+          channel_ids: z.array(z.string().trim().min(1).max(128)).min(1).max(100),
+        }).strict(),
+      ]);
+
+      const params = schema.parse(args);
+
+      switch (params.mode) {
+        case 'selected': {
+          const channelIds = [...new Set(params.channel_ids)];
+          const result = await client.markChannelsRead(userId, channelIds);
+          return {
+            content: [{ type: 'text', text: formatMarkChannelsReadResult(result) }],
+          };
+        }
+        case 'all': {
+          const channels = await client.getAllChannelsForUser(userId);
+          const channelIds = [...new Set(channels.map((channel) => channel.id))];
+          if (channelIds.length === 0) {
+            return {
+              content: [{ type: 'text', text: 'No channels available to mark as read.' }],
+            };
+          }
+
+          const result = await client.markChannelsRead(userId, channelIds);
+          return {
+            content: [{ type: 'text', text: formatMarkChannelsReadResult(result) }],
+          };
+        }
+        default: {
+          const exhaustiveInput: never = params;
+          return exhaustiveInput;
+        }
+      }
     },
   },
 ];
