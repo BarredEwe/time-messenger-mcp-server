@@ -91,6 +91,13 @@ function requireCategoryOfType(categories: readonly ChannelCategory[], type: Cha
   return category;
 }
 
+function requireNotInManagedCategory(categories: readonly ChannelCategory[], channelId: string): void {
+  const managed = categories.find((category) => category.type === 'managed' && category.channel_ids.includes(channelId));
+  if (managed !== undefined) {
+    throw new Error(`Channel ${channelId} belongs to managed category ${managed.display_name} and cannot be moved.`);
+  }
+}
+
 function sameChannelIds(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((channelId, index) => channelId === right[index]);
 }
@@ -125,7 +132,10 @@ async function applyMove(
   const updated = await client.updateChannelCategories(userId, teamId, changedCategories);
   const destinations = updated.filter((category) => category.id === destinationId);
   if (destinations.length !== 1 || !destinations[0].channel_ids.includes(channelId)) {
-    throw new Error(`Channel category update did not confirm channel ${channelId} in destination ${destinationId}.`);
+    throw new Error(
+      `Channel category update did not confirm channel ${channelId} in destination ${destinationId}. ` +
+      'The channel may not exist or the user may not be a member of it.'
+    );
   }
 }
 
@@ -281,6 +291,13 @@ export const channelCategoryTools = [
           `${destination.type === 'direct_messages' ? 'Direct messages' : 'Managed'} channel categories cannot be destinations.`
         );
       }
+      requireNotInManagedCategory(categoryList.categories, params.channel_id);
+      if (destination.type === 'channels') {
+        const channel = await client.getChannel(params.channel_id);
+        if (channel.type === 'D' || channel.type === 'G') {
+          throw new Error('Direct and group messages cannot be moved to the Channels category.');
+        }
+      }
       const changed = moveChannelToCategory(categoryList.categories, params.channel_id, destination);
       if (changed.length === 0) {
         return textResult(`Channel ${params.channel_id} is already in category ${destination.display_name}.`);
@@ -310,6 +327,7 @@ export const channelCategoryTools = [
         return textResult(`Channel ${params.channel_id} is already ${params.favorite ? 'favorited' : 'not favorited'}.`);
       }
 
+      requireNotInManagedCategory(categoryList.categories, params.channel_id);
       let destination = favorites;
       if (!params.favorite) {
         const channel = await client.getChannel(params.channel_id);

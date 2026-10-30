@@ -823,7 +823,7 @@ describe('channel category tools', () => {
       id: 'managed',
       type: 'managed',
       display_name: 'Managed',
-      channel_ids: ['channel-1'],
+      channel_ids: ['channel-9'],
     });
     client = createMockClient({
       getChannelCategories: vi.fn().mockResolvedValue({
@@ -931,7 +931,7 @@ describe('channel category tools', () => {
   it('skips the collection update when a move is already normalized', async () => {
     const channels = createCategory({ id: 'channels', type: 'channels', channel_ids: ['channel-2'] });
     const destination = createCategory({ id: 'destination', channel_ids: ['channel-1'] });
-    const managed = createCategory({ id: 'managed', type: 'managed', channel_ids: ['channel-1'] });
+    const managed = createCategory({ id: 'managed', type: 'managed', channel_ids: ['channel-9'] });
     client = createMockClient({
       getChannelCategories: vi.fn().mockResolvedValue({
         categories: [channels, destination, managed],
@@ -1222,6 +1222,43 @@ describe('channel category tools', () => {
       ]);
     }
   );
+
+  it.each([
+    { tool: 'move_channel_to_category', args: { category_id: 'custom' } },
+    { tool: 'set_channel_favorite', args: { favorite: true } },
+  ])('$tool rejects channels that belong to a managed category', async ({ tool, args }) => {
+    const managed = createCategory({ id: 'managed', type: 'managed', display_name: 'Managed', channel_ids: ['channel-1'] });
+    const custom = createCategory({ id: 'custom', channel_ids: [] });
+    const favorites = createCategory({ id: 'favorites', type: 'favorites', channel_ids: [] });
+    client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({
+        categories: [managed, custom, favorites],
+        order: [managed.id, custom.id, favorites.id],
+      }),
+    });
+
+    await expect(
+      findChannelCategoryTool(tool).handler(client, { team_id: 'team-1', channel_id: 'channel-1', ...args }, userId)
+    ).rejects.toThrow(/managed category/i);
+    expect(client.updateChannelCategories).not.toHaveBeenCalled();
+  });
+
+  it.each(['D', 'G'] as const)('rejects moving a %s channel to the Channels category', async (channelType) => {
+    const channels = createCategory({ id: 'channels', type: 'channels', channel_ids: [] });
+    client = createMockClient({
+      getChannelCategories: vi.fn().mockResolvedValue({ categories: [channels], order: [channels.id] }),
+      getChannel: vi.fn().mockResolvedValue({ id: 'dm-1', type: channelType } as Channel),
+    });
+
+    await expect(
+      findChannelCategoryTool('move_channel_to_category').handler(
+        client,
+        { team_id: 'team-1', channel_id: 'dm-1', category_id: channels.id },
+        userId
+      )
+    ).rejects.toThrow(/direct and group messages/i);
+    expect(client.updateChannelCategories).not.toHaveBeenCalled();
+  });
 });
 
 describe('teamTools handlers', () => {
