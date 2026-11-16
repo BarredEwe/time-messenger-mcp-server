@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { formatPostList, formatSearchResult } from '../tools/messages.js';
+import {
+  formatChannelThreadRoots,
+  formatPostList,
+  formatSearchResult,
+} from '../tools/messages.js';
 import type { Post, PostList } from '../types/time-api.js';
 
 const makePost = (overrides: Partial<Post> & { id: string; message: string }): Post => ({
@@ -129,6 +133,59 @@ describe('post identity in output', () => {
     // Search API returns newest-first.
     const result = formatSearchResult({ order: ['p2', 'p1'], posts: { p1, p2 } });
     expect(result.indexOf('Older')).toBeLessThan(result.indexOf('Newer'));
+  });
+});
+
+describe('formatChannelThreadRoots', () => {
+  it('returns "No threads found." for empty input', () => {
+    expect(formatChannelThreadRoots([])).toBe('No threads found.');
+  });
+
+  it('formats each root message without reply bodies', () => {
+    const p1 = makePost({ id: 'p1', message: 'First thread', create_at: 1000 });
+    const p2 = makePost({ id: 'p2', message: 'Second thread', create_at: 2000 });
+    const result = formatChannelThreadRoots([p1, p2]);
+
+    expect(result).toContain('Found 2 thread starter(s)');
+    expect(result).toContain('First thread');
+    expect(result).toContain('Second thread');
+    expect(result).toContain('Post ID: p1');
+  });
+
+  it('keeps the handed-in (oldest-first) order of posts', () => {
+    const older = makePost({ id: 'p1', message: 'Older thread', create_at: 1000 });
+    const newer = makePost({ id: 'p2', message: 'Newer thread', create_at: 2000 });
+    const result = formatChannelThreadRoots([older, newer]);
+    expect(result.indexOf('Older thread')).toBeLessThan(result.indexOf('Newer thread'));
+  });
+
+  it('omits the count header when the page has only stray replies', () => {
+    const reply = makePost({ id: 'p2', message: 'Reply', root_id: 'p9' });
+    const result = formatChannelThreadRoots([reply], undefined, ['p9']);
+    expect(result).not.toContain('Found 0');
+    expect(result).toContain('p9');
+    expect(result).toContain('get_thread_messages');
+  });
+
+  it('skips stray replies from the output but lists their root ids', () => {
+    const reply = makePost({ id: 'p2', message: 'Reply text', root_id: 'p9' });
+    const result = formatChannelThreadRoots([reply], undefined, ['p9']);
+
+    expect(result).not.toContain('Reply text');
+    expect(result).toContain('p9');
+  });
+
+  it('renders resolved usernames and a hint to read threads', () => {
+    const root = makePost({ id: 'p1', message: 'Root', user_id: 'u1' });
+    const result = formatChannelThreadRoots([root], new Map([['u1', 'i.knapp']]));
+    expect(result).toContain('@i.knapp');
+    expect(result).toContain('get_thread_messages');
+  });
+
+  it('returns "No threads found." when only replies are present', () => {
+    const reply = makePost({ id: 'p2', message: 'Reply', root_id: 'p9' });
+    const result = formatChannelThreadRoots([reply], undefined, []);
+    expect(result).toBe('No threads found.');
   });
 });
 

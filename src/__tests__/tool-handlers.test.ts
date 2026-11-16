@@ -38,6 +38,7 @@ function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
     updateChannelCategories: vi.fn().mockResolvedValue([]),
     createPost: vi.fn().mockResolvedValue({ id: 'p1', create_at: 1000 } as Post),
     getPostsForChannel: vi.fn().mockResolvedValue({ order: [], posts: {}, next_post_id: '', prev_post_id: '' } as PostList),
+    getRootPostsForChannel: vi.fn().mockResolvedValue({ order: [], posts: {}, next_post_id: '', prev_post_id: '' } as PostList),
     getPostThread: vi.fn().mockResolvedValue({ order: [], posts: {}, next_post_id: '', prev_post_id: '' } as PostList),
     searchPosts: vi.fn().mockResolvedValue({ order: [], posts: {} } as SearchResult),
     getUserThreads: vi.fn().mockResolvedValue([] as Thread[]),
@@ -132,6 +133,124 @@ describe('messageTools handlers', () => {
     const tool = findTool(messageTools, 'get_channel_messages');
     await tool.handler(client, { channel_id: 'ch1', per_page: 200 });
     expect(client.getPostsForChannel).toHaveBeenCalledWith('ch1', 0, 200);
+  });
+
+  describe('list_channel_threads', () => {
+    const root = {
+      id: 'p1',
+      user_id: 'u1',
+      message: 'Root message',
+      root_id: '',
+      create_at: 1000,
+    } as Post;
+    const rootsList = {
+      order: ['p1', 'p0'],
+      posts: { p1: root, p0: { ...root, id: 'p0' } as Post },
+      next_post_id: '',
+      prev_post_id: '',
+    } as PostList;
+
+    it('calls getRootPostsForChannel with defaults per_page=30', async () => {
+      const tool = findTool(messageTools, 'list_channel_threads');
+      await tool.handler(client, { channel_id: 'ch1' });
+      expect(client.getRootPostsForChannel).toHaveBeenCalledWith('ch1', 0, 30);
+      expect(client.getPostsForChannel).not.toHaveBeenCalled();
+    });
+
+    it('passes page and per_page through', async () => {
+      const tool = findTool(messageTools, 'list_channel_threads');
+      await tool.handler(client, { channel_id: 'ch1', page: 3, per_page: 10 });
+      expect(client.getRootPostsForChannel).toHaveBeenCalledWith('ch1', 3, 10);
+    });
+
+    it('rejects per_page over the 200 cap', async () => {
+      const tool = findTool(messageTools, 'list_channel_threads');
+      await expect(
+        tool.handler(client, { channel_id: 'ch1', per_page: 201 })
+      ).rejects.toThrow();
+      expect(client.getRootPostsForChannel).not.toHaveBeenCalled();
+    });
+
+    it('rejects the removed include_replies parameter', async () => {
+      const tool = findTool(messageTools, 'list_channel_threads');
+      await expect(
+        tool.handler(client, { channel_id: 'ch1', include_replies: false })
+      ).rejects.toThrow();
+    });
+
+    it('formats thread starters without fetching any thread bodies', async () => {
+      const c = createMockClient({
+        getRootPostsForChannel: vi.fn().mockResolvedValue(rootsList),
+      });
+      const tool = findTool(messageTools, 'list_channel_threads');
+      const result = await tool.handler(c, { channel_id: 'ch1' });
+
+      expect(c.getPostThread).not.toHaveBeenCalled();
+      const text = result.content[0].text;
+      expect(text).toContain('Found 2 thread starter(s)');
+      expect(text).toContain('Root message');
+      expect(text).toContain('Post ID: p1');
+      expect(text).toContain('get_thread_messages');
+    });
+
+    it('lists root ids of stray replies when the server ignores the CRT filter', async () => {
+      const strayReply = {
+        id: 'p9',
+        user_id: 'u1',
+        message: 'stray',
+        root_id: 'p-hidden',
+        create_at: 2000,
+      } as Post;
+      const badList = {
+        order: ['p1', 'p9'],
+        posts: { p1: root, p9: strayReply },
+        next_post_id: '',
+        prev_post_id: '',
+      } as PostList;
+      const c = createMockClient({
+        getRootPostsForChannel: vi.fn().mockResolvedValue(badList),
+      });
+
+      const tool = findTool(messageTools, 'list_channel_threads');
+      const result = await tool.handler(c, { channel_id: 'ch1' });
+
+      const text = result.content[0].text;
+      expect(text).toContain('Found 1 thread starter(s)');
+      expect(text).toContain('p-hidden');
+      expect(text).not.toContain('stray');
+    });
+
+    it('does not list a stray reply whose root is already shown on the page', async () => {
+      const strayReply = {
+        id: 'p9',
+        user_id: 'u1',
+        message: 'stray',
+        root_id: 'p1',
+        create_at: 2000,
+      } as Post;
+      const badList = {
+        order: ['p1', 'p9'],
+        posts: { p1: root, p9: strayReply },
+        next_post_id: '',
+        prev_post_id: '',
+      } as PostList;
+      const c = createMockClient({
+        getRootPostsForChannel: vi.fn().mockResolvedValue(badList),
+      });
+
+      const tool = findTool(messageTools, 'list_channel_threads');
+      const result = await tool.handler(c, { channel_id: 'ch1' });
+
+      const text = result.content[0].text;
+      expect(text).toContain('Found 1 thread starter(s)');
+      expect(text).not.toContain('whose root post'); // p1 is shown, no detached note
+      expect(text).not.toContain('stray');
+    });
+
+    it('rejects missing channel_id', async () => {
+      const tool = findTool(messageTools, 'list_channel_threads');
+      await expect(tool.handler(client, {})).rejects.toThrow();
+    });
   });
 
   it('get_thread_messages calls getPostThread', async () => {

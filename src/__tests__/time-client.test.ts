@@ -752,6 +752,24 @@ describe('TimeClient', () => {
       );
     });
 
+    it('getRootPostsForChannel sends the CRT roots-only filter', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ order: [], posts: {} }));
+      await client.getRootPostsForChannel('ch1', 2, 30);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/channels/ch1/posts?page=2&per_page=30&collapsedThreads=true&collapsedThreadsExtended=false',
+        expect.anything()
+      );
+    });
+
+    it('getRootPostsForChannel defaults page=0, per_page=60', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ order: [], posts: {} }));
+      await client.getRootPostsForChannel('ch1');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/channels/ch1/posts?page=0&per_page=60&collapsedThreads=true&collapsedThreadsExtended=false',
+        expect.anything()
+      );
+    });
+
     it('getPost calls GET /posts/{id}', async () => {
       fetchSpy.mockReturnValue(mockFetchResponse({ id: 'p1' }));
       await client.getPost('p1');
