@@ -436,6 +436,24 @@ export class TimeClient {
     );
   }
 
+  /**
+   * Root (thread-starting) posts only. `collapsedThreads=true` makes the
+   * server skip thread replies entirely, so every page is purely roots and
+   * per_page counts roots — verified against the live instance; the flag
+   * is not just a metadata hint.
+   */
+  async getRootPostsForChannel(
+    channelId: string,
+    page: number = 0,
+    perPage: number = 60
+  ): Promise<PostList> {
+    return this.request<PostList>(
+      'GET',
+      `/channels/${enc(channelId)}/posts?page=${page}&per_page=${perPage}` +
+        `&collapsedThreads=true&collapsedThreadsExtended=false`
+    );
+  }
+
   async getPost(postId: string): Promise<Post> {
     return this.request<Post>('GET', `/posts/${enc(postId)}`);
   }

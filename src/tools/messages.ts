@@ -52,7 +52,8 @@ export const messageTools = [
 
   {
     name: 'get_channel_messages',
-    description: 'Get messages from a channel with pagination',
+    description:
+      'Get messages from a channel with pagination. NOTE: returns root messages and thread replies mixed together in one flat list; use list_channel_threads to see them grouped by thread',
     inputSchema: {
       type: 'object',
       properties: {
@@ -91,6 +92,73 @@ export const messageTools = [
           {
             type: 'text',
             text: formatPostList(postList, authors),
+          },
+        ],
+      };
+    },
+  },
+
+  {
+    name: 'list_channel_threads',
+    description:
+      'List thread starters from a channel: only the first (root) message of each thread, chronological order like get_channel_messages (oldest first), no thread replies. Use get_thread_messages with a Post ID to read that thread in full',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel_id: {
+          type: 'string',
+          description: 'Channel ID',
+        },
+        page: {
+          type: 'number',
+          description: 'Page number (default: 0)',
+        },
+        per_page: {
+          type: 'number',
+          description:
+            'Root messages per page (default: 30, max: 200). Threads with no replies are treated as roots too',
+        },
+      },
+      required: ['channel_id'],
+    },
+    handler: async (client: TimeClient, args: unknown) => {
+      const schema = z
+        .object({
+          channel_id: z.string(),
+          page: z.number().int().min(0).default(0),
+          per_page: z.number().int().min(1).max(200).default(30),
+        })
+        .strict();
+
+      const params = schema.parse(args);
+      // collapsedThreads=true: the server filters out thread replies, so one
+      // request returns a page of pure root posts.
+      const postList = await client.getRootPostsForChannel(
+        params.channel_id,
+        params.page,
+        params.per_page
+      );
+      const posts = extractPosts(postList);
+      // CRT hides replies, but if a deployment ignores the flag and returns
+      // some anyway, surface their roots instead of silently dropping them.
+      // Roots already shown on this page need no extra mention.
+      const rootIds = new Set(
+        posts.filter((p) => !p.root_id).map((p) => p.id)
+      );
+      const detachedRootIds = [
+        ...new Set(
+          posts
+            .filter((p) => p.root_id && !rootIds.has(p.root_id))
+            .map((p) => p.root_id)
+        ),
+      ];
+      const authors = await resolveAuthors(client, posts);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: formatChannelThreadRoots(posts, authors, detachedRootIds),
           },
         ],
       };
@@ -223,6 +291,44 @@ export function formatPostList(
   });
 
   return lines.join('\n\n');
+}
+
+/**
+ * Roots-only view of channel threads: one block per root (thread-starting)
+ * message, no reply bodies. `posts` should already be root-only (the CRT
+ * server filter); replies included by mistake are kept out of the output
+ * but their root ids are listed so no thread is silently lost.
+ */
+export function formatChannelThreadRoots(
+  posts: Post[],
+  authors?: Map<string, string>,
+  detachedRootIds: string[] = []
+): string {
+  const roots = posts.filter((p) => !p.root_id);
+
+  if (roots.length === 0 && detachedRootIds.length === 0) {
+    return 'No threads found.';
+  }
+
+  const lines = roots.map((post) => {
+    const date = new Date(post.create_at).toLocaleString();
+    return `[${date}] ${formatAuthor(post, authors)}\n${post.message}\nPost ID: ${post.id}`;
+  });
+
+  const parts: string[] = [];
+  if (roots.length > 0) {
+    parts.push(`Found ${roots.length} thread starter(s):\n\n${lines.join('\n\n---\n\n')}`);
+  }
+
+  if (detachedRootIds.length > 0) {
+    const count = detachedRootIds.length;
+    const noun = count === 1 ? 'reply belongs to a thread' : 'replies belong to threads';
+    parts.push(`${count} ${noun} whose root post${count === 1 ? ' is' : 's are'} not shown: ${detachedRootIds.join(', ')}`);
+  }
+
+  parts.push('Pass a Post ID to get_thread_messages to read its thread.');
+
+  return parts.join('\n\n---\n\n');
 }
 
 export function formatSearchResult(
