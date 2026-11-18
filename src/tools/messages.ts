@@ -101,7 +101,7 @@ export const messageTools = [
   {
     name: 'list_channel_threads',
     description:
-      'List thread starters from a channel: only the first (root) message of each thread, chronological order like get_channel_messages (oldest first), no thread replies. Use get_thread_messages with a Post ID to read that thread in full',
+      'List root messages from a channel without thread replies. Page 0 contains the newest root messages. Higher page numbers fetch older root messages. Within each page, messages are ordered from oldest to newest. Use get_thread_messages with a Post ID to read that thread in full.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -111,7 +111,7 @@ export const messageTools = [
         },
         page: {
           type: 'number',
-          description: 'Page number (default: 0)',
+          description: 'Page number. Page 0 is the newest and the default. Higher page numbers fetch older messages.',
         },
         per_page: {
           type: 'number',
